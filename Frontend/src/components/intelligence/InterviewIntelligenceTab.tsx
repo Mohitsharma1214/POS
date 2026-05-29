@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Bot, RefreshCw, Send, Sparkles, MessageCircle, AlertTriangle, Activity, HelpCircle, Eye, ShieldAlert } from 'lucide-react';
+import { getApiUrl } from '../../lib/api';
 
 interface FollowUp {
   type: string;
@@ -63,12 +64,7 @@ export const InterviewIntelligenceTab: React.FC = () => {
     setError('');
     
     try {
-      // In a real app we might read this from a config or env
-      const baseUrl = typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-        ? 'http://localhost:8000' 
-        : '';
-        
-      const response = await fetch(`${baseUrl}/interview/intelligence`, {
+      const response = await fetch(getApiUrl('/interview/intelligence'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

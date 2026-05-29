@@ -15,8 +15,8 @@ app = FastAPI(title="Podcast Guest Research Infrastructure", on_startup=[on_star
 # Allow CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for debugging
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins for debugging and deployment
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
