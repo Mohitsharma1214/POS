@@ -123,7 +123,7 @@ const renderSafeString = (val: any): React.ReactNode => {
       return (
         <span className="space-y-1 block font-sans">
           {val.visual_description && <span className="block">{renderSafeString(val.visual_description)}</span>}
-          {val.text_overlay && <span className="block">"{renderSafeString(val.text_overlay)}"</span>}
+          {val.text_overlay && <span className="block">&quot;{renderSafeString(val.text_overlay)}&quot;</span>}
         </span>
       );
     }
@@ -1158,7 +1158,7 @@ export default function ResearchDashboard(props: Props) {
                           {/* Overlap Thesis */}
                           {g.audience_overlap_reason && (
                             <p className="text-xs text-neutral-400 leading-relaxed italic mb-4 border-l-2 border-yellow-500/20 pl-2.5 py-0.5 line-clamp-3 hover:line-clamp-none transition-all duration-300 cursor-pointer" title="Hover to expand thesis">
-                              "{g.audience_overlap_reason}"
+                              &quot;{g.audience_overlap_reason}&quot;
                             </p>
                           )}
                           
@@ -1347,7 +1347,7 @@ export default function ResearchDashboard(props: Props) {
                                 <ul className="space-y-1.5 text-xs text-neutral-300 list-disc list-inside leading-relaxed">
                                   {ep.real_questions_asked.slice(0, 3).map((q, idx) => (
                                     <li key={idx} className="line-clamp-2 italic">
-                                      "{q}"
+                                      &quot;{q}&quot;
                                     </li>
                                   ))}
                                 </ul>
@@ -1480,7 +1480,7 @@ export default function ResearchDashboard(props: Props) {
                                 <ul className="space-y-1.5 text-xs text-neutral-300 list-disc list-inside leading-relaxed">
                                   {trend.real_questions_asked.slice(0, 3).map((q, idx) => (
                                     <li key={idx} className="line-clamp-2 italic">
-                                      "{q}"
+                                      &quot;{q}&quot;
                                     </li>
                                   ))}
                                 </ul>

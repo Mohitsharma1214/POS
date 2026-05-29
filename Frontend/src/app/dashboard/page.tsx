@@ -49,7 +49,7 @@ export default function DashboardPage() {
           <div className="absolute top-0 left-0 w-full h-[3px] bg-orange-500" />
           <h2 className="text-lg font-black text-white mb-2 tracking-tight">No Research Dossier Loaded</h2>
           <p className="text-xs text-neutral-400 leading-relaxed mb-6">
-            You haven't run any research yet or the current session has expired. Start a new research task on the homepage.
+            You haven&apos;t run any research yet or the current session has expired. Start a new research task on the homepage.
           </p>
           <a
             href="/"
