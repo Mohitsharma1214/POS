@@ -35,9 +35,9 @@ export function mapBackendToGuestIntelligence(raw: any): PodcastIntelligenceOutp
     apify_scrape_episodes: d.apify_scrape_episodes || [],
     
     // Auto-map new precomputed assets
-    patterns: d.patterns || undefined,
-    intelligence: d.intelligence || undefined,
-    brief: d.brief || undefined,
+    patterns: d.patterns?.pattern_report || d.patterns || undefined,
+    intelligence: d.intelligence?.intelligence_report || d.intelligence || undefined,
+    brief: d.brief?.brief_report || d.brief || undefined,
     quality_assessment: d.quality_assessment || d.scoring || undefined,
   };
 }
