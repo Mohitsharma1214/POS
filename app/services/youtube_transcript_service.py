@@ -52,7 +52,7 @@ class YouTubeTranscriptService:
             transcript_list = None
             for attempt in range(1, max_attempts + 1):
                 try:
-                    transcript_list = YouTubeTranscriptApi().fetch(
+                    transcript_list = YouTubeTranscriptApi.get_transcript(
                         video_id, languages=["en", "en-US"]
                     )
                     # Success – break out of retry loop
@@ -72,7 +72,7 @@ class YouTubeTranscriptService:
                         raise
             if transcript_list is None:
                 raise Exception("Failed to fetch YouTube transcript after retries.")
-            transcript_text = " ".join([t.text for t in transcript_list])
+            transcript_text = " ".join([t.get("text", "") for t in transcript_list])
             logger.info(
                 f"Successfully retrieved raw transcript for video {video_id} ({len(transcript_text)} characters)."
             )

@@ -54,8 +54,9 @@ class TwitterSignalService:
             }
             
             try:
+                import asyncio
                 # Run the actor and wait for it to finish
-                run = await self.apify_client.actor("apidojo/tweet-scraper").call(run_input=run_input)
+                run = await asyncio.wait_for(self.apify_client.actor("apidojo/tweet-scraper").call(run_input=run_input), timeout=5.0)
                 
                 # Fetch results from the dataset
                 dataset = self.apify_client.dataset(run["defaultDatasetId"])

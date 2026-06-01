@@ -19,6 +19,8 @@ FREE_MODEL_SLUGS = [
 class OpenRouterService:
     def __init__(self, model: Optional[str] = None):
         self.api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self.timeout = int(os.getenv("OPENROUTER_TIMEOUT", 8))
+        self.max_retries = int(os.getenv("OPENROUTER_MAX_RETRIES", 1))
         # Enforce only free models strictly
         configured_model = model or os.getenv("OPENROUTER_MODEL")
         if configured_model and (configured_model.endswith(":free") or configured_model == "openrouter/free"):
@@ -185,8 +187,8 @@ Return only valid JSON matching this schema, without any markdown code block for
                     last_error = e
                     
             # If all models failed, sleep and retry
-            logging.warning(f"All models failed on attempt {attempt + 1}/{self.max_retries}. Sleeping for 5 seconds before retrying...")
-            await asyncio.sleep(5)
+            logging.warning(f"All models failed on attempt {attempt + 1}/{self.max_retries}. Sleeping for 1 seconds before retrying...")
+            await asyncio.sleep(1)
             
         raise RuntimeError(f"OpenRouter API failed for all models after {self.max_retries} attempts. Last error: {last_error}")
 

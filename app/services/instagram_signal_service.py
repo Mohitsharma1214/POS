@@ -37,7 +37,8 @@ class InstagramSignalService:
             }
             
             try:
-                run = await self.apify_client.actor("apify/instagram-scraper").call(run_input=run_input)
+                import asyncio
+                run = await asyncio.wait_for(self.apify_client.actor("apify/instagram-scraper").call(run_input=run_input), timeout=5.0)
                 dataset = self.apify_client.dataset(run["defaultDatasetId"])
                 dataset_items = await dataset.list_items()
                 raw_results = dataset_items.items
