@@ -23,11 +23,18 @@ class Contradiction(BaseModel):
     stance_b: str = Field(..., description="Position B or current conflicting statement/direction")
     analysis: str = Field(..., description="Brief breakdown of the conversational friction or developmental paradox")
 
+class UntappedAngle(BaseModel):
+    angle: str = Field(..., description="The highly specific investigative angle or controversial prompt")
+    context: str = Field(..., description="Why this angle is untapped and the underlying operational tension")
+    explanation: str = Field(..., description="A brief explanation of what this angle is actually exploring")
+    data_source: str = Field(..., description="The source of the data or signal that inspired this angle")
+
 class GuestIntelligenceReport(BaseModel):
     enrichment: GuestEnrichment = Field(..., description="Enriched biographical metadata")
     biography_timeline: List[TimelineEvent] = Field(default_factory=list, description="A detailed chronological record of the guest's life history")
     covered_angles: List[str] = Field(default_factory=list, description="Highly saturated angles/themes they cover on every podcast")
-    untapped_angles: List[str] = Field(default_factory=list, description="Fresh, original angles or custom questions to ask")
+    untapped_angles: List[UntappedAngle] = Field(default_factory=list, description="Fresh, original angles or custom questions to ask")
+    prior_questions_asked: List[str] = Field(default_factory=list, description="Questions previously asked to this guest in top videos")
     public_stances: List[PublicStance] = Field(default_factory=list, description="Known public positions and statements")
     contradictions: List[Contradiction] = Field(default_factory=list, description="Interesting contradictions, career paradoxes, or shifts in stance")
     viewer_curiosity_gaps: List[str] = Field(default_factory=list, description="Gaps in the guest's narrative that spark curiosity")

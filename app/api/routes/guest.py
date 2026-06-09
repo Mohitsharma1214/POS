@@ -10,7 +10,7 @@ from app.services.claude_pattern_service import ClaudePatternService
 from app.services.guest_intelligence_service import GuestIntelligenceService
 from app.services.virality_brief_service import ViralityBriefService
 from app.services.pipeline import run_full_pipeline
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 router = APIRouter()
 
@@ -21,8 +21,9 @@ async def research_guest(guest: GuestInput) -> PodcastIntelligenceOutput:
         inferred_context = guest.podcast_context
 
         if not inferred_niche or not inferred_context:
-            open_router = OpenRouterService()
-            inferred_data = await open_router.infer_guest_context(
+            from app.core.config import settings
+            llm = AnthropicService(model=settings.MODEL_HAIKU)
+            inferred_data = await llm.infer_guest_context(
                 guest.guest_name, guest.guest_company or ""
             )
             inferred_niche = inferred_niche or inferred_data.get("guest_niche", "")
@@ -33,7 +34,7 @@ async def research_guest(guest: GuestInput) -> PodcastIntelligenceOutput:
         active_niche = inferred_niche or guest.guest_niche
         signal_service = SignalCollectionService()
         signals = await signal_service.collect_signals(
-            guest.guest_name, active_niche
+            guest.guest_name, active_niche, guest.guest_company or ""
         )
         signals.inferred_niche = inferred_niche
         signals.inferred_podcast_context = inferred_context
@@ -81,7 +82,7 @@ async def extract_working_patterns(guest: GuestInput) -> PatternExtractionRespon
             )
             signal_service = SignalCollectionService()
             signals = await signal_service.collect_signals(
-                guest.guest_name, guest.guest_niche
+                guest.guest_name, guest.guest_niche, guest.guest_company or ""
             )
             pattern_report = await pattern_service.extract_patterns(
                 signals.apify_scrape_episodes, guest_name=guest.guest_name
@@ -125,6 +126,7 @@ async def generate_virality_brief(guest: GuestInput) -> ViralityBriefResponse:
             cached_patterns=guest.cached_patterns,
             cached_intelligence=guest.cached_intelligence,
             cached_comments=guest.cached_comments,
+            cached_signals=guest.cached_signals,
         )
     except Exception as e:
         logging.exception("Step 4 Virality Brief generation failed")
@@ -133,12 +135,36 @@ async def generate_virality_brief(guest: GuestInput) -> ViralityBriefResponse:
             detail=f"Virality brief generation failed: {e}",
         )
 
+from app.schemas.virality_brief_schema import RegenerateItemRequest, RegenerateItemResponse
+
+@router.post("/virality-brief/regenerate-item", response_model=RegenerateItemResponse)
+async def regenerate_virality_item(req: RegenerateItemRequest) -> RegenerateItemResponse:
+    try:
+        service = ViralityBriefService()
+        new_item = await service.regenerate_single_item(
+            item_type=req.item_type,
+            guest_name=req.guest_name,
+            guest_niche=req.guest_niche,
+            cached_patterns=req.cached_patterns,
+            cached_intelligence=req.cached_intelligence,
+            cached_comments=req.cached_comments,
+            cached_signals=req.cached_signals,
+            existing_items=req.existing_items,
+        )
+        return RegenerateItemResponse(item_type=req.item_type, item=new_item)
+    except Exception as e:
+        logging.exception(f"Virality brief item regeneration failed for {req.item_type}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Item regeneration failed: {e}",
+        )
+
 @router.post("/full-pipeline")
 async def execute_fallback_pipeline(guest: GuestInput):
     try:
         signal_service = SignalCollectionService()
         signals = await signal_service.collect_signals(
-            guest.guest_name, guest.guest_niche or "General"
+            guest.guest_name, guest.guest_niche or "General", guest.guest_company or ""
         )
         signals_dict = {
             "apify_scrape_episodes": [
@@ -192,7 +218,7 @@ async def execute_fallback_pipeline(guest: GuestInput):
                 max_retries_per_model=3,
             )
         except Exception as e:
-            logging.error(f"run_full_pipeline failed (likely OpenRouter API limits): {e}")
+            logging.error(f"run_full_pipeline failed (likely Anthropic API limits): {e}")
             pipeline_output = {}
             
         if not pipeline_output:

@@ -12,15 +12,16 @@ from app.schemas.guest_intelligence_schema import (
     GuestIntelligenceReport,
     GuestIntelligenceResponse,
 )
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 from app.services.tavily_signal_service import TavilySignalService
 from app.services.youtube_transcript_service import YouTubeTranscriptService
 
 
 class GuestIntelligenceService:
     def __init__(self):
+        from app.core.config import settings
         self.tavily = TavilySignalService()
-        self.openrouter = OpenRouterService()
+        self.llm = AnthropicService(model=settings.MODEL_OPUS)
         self.transcript_service = YouTubeTranscriptService()
 
     @staticmethod
@@ -79,7 +80,7 @@ class GuestIntelligenceService:
             if vid and vid not in seen_vids:
                 seen_vids.add(vid)
                 episode_meta.append((vid, title, description))
-            if len(episode_meta) >= 3:
+            if len(episode_meta) >= 2:
                 break
 
         # ── 3. Run Tavily + transcript extraction in parallel ───────────────────
@@ -206,7 +207,11 @@ RESEARCH CONTEXT:
 Using this live research data, return a PURE JSON object with EXACTLY these four top-level keys:
 
 1. "covered_angles": A list of 4-5 topics or angles this guest discusses on nearly EVERY podcast appearance. Make each item a highly descriptive sentence detailing the standard narrative or talking points they repeat (avoid short generic titles like "AI growth").
-2. "untapped_angles": A list of 4-5 genuinely original, specific narrative paths that NO OTHER HOST has explored with this guest. Each must be: Fact-dense, highly specific, and detail-laden. Frame each as a substantial 2-3 sentence investigative angle or controversial prompt clearly specifying the underlying operational tension, omitted web signal, or strategic counterweight.
+2. "untapped_angles": A list of 4-5 genuinely original, specific narrative paths that NO OTHER HOST has explored with this guest. Each item must be a JSON object with:
+   - "angle": The highly specific investigative angle or controversial prompt.
+   - "context": A brief explanation of WHY this is untapped and the underlying operational tension it exposes.
+   - "explanation": What this angle is actually exploring or trying to extract from the guest.
+   - "data_source": The source of the signal (e.g. "Web Search", "Recent Tweet", "Omitted from prior podcast interviews").
 3. "public_stances": A list of 4-5 major public positions this guest has taken. Each item must be a JSON object with:
    - "topic": The subject matter (e.g. "AI Safety", "Monetary Policy").
    - "position": Their highly specific, concrete public stance, complete with strategic rationale or key trade-off.
@@ -228,7 +233,7 @@ Rules:
         intel_data: Optional[dict] = None
 
         try:
-            raw_bio = await self.openrouter.complete_long(prompt_bio, return_json=True)
+            raw_bio = await self.llm.complete_long(prompt_bio, return_json=True)
             if isinstance(raw_bio, dict) and "enrichment" in raw_bio:
                 bio_data = raw_bio
                 logging.info(f"[Step 3] Call 1 (Bio+Timeline) succeeded for '{guest_name}'.")
@@ -241,7 +246,7 @@ Rules:
             logging.error(f"[Step 3] LLM Call 1 (Bio+Timeline) failed for '{guest_name}': {e}")
 
         try:
-            raw_intel = await self.openrouter.complete_long(prompt_intel, return_json=True)
+            raw_intel = await self.llm.complete_long(prompt_intel, return_json=True)
             if isinstance(raw_intel, dict) and (
                 "covered_angles" in raw_intel or "untapped_angles" in raw_intel
             ):
@@ -257,7 +262,7 @@ Rules:
 
         # ── 8. Merge or fall back ──────────────────────────────────────────────
         if bio_data or intel_data:
-            report = self._merge_reports(bio_data or {}, intel_data or {})
+            report = self._merge_reports(bio_data or {}, intel_data or {}, prior_questions=transcript_questions)
             return GuestIntelligenceResponse(guest_name=guest_name, intelligence_report=report)
 
         # Both LLM calls failed — build a minimal live report from Tavily data only
@@ -274,8 +279,9 @@ Rules:
 
     # ── Helpers ──────────────────────────────────────────────────────────────────
 
-    def _merge_reports(self, bio_data: dict, intel_data: dict) -> GuestIntelligenceReport:
+    def _merge_reports(self, bio_data: dict, intel_data: dict, prior_questions: list = None) -> GuestIntelligenceReport:
         """Merges outputs from the two LLM calls into a single GuestIntelligenceReport."""
+        prior_questions = prior_questions or []
 
         enrichment_raw = bio_data.get("enrichment") or {}
         raw_profiles = (
@@ -355,19 +361,36 @@ Rules:
                     )
                 )
 
+        covered_angles = (
+            intel_data.get("covered_angles")
+            or intel_data.get("coveredAngles")
+            or []
+        )
+        if not covered_angles:
+            covered_angles = [
+                "Generic biographical recount of their early career and origin story",
+                "High-level generic advice on industry trends and future outlook",
+                "Rehearsed PR talking points regarding their current main project"
+            ]
+
+        untapped_angles = (
+            intel_data.get("untapped_angles")
+            or intel_data.get("untappedAngles")
+            or []
+        )
+        if not untapped_angles:
+            untapped_angles = [
+                "The specific financial or operational metrics behind their most obscure failure",
+                "Contrarian or unpopular opinions they hold that contradict their industry peers",
+                "The psychological toll and unglamorous reality of their largest transition period"
+            ]
+
         return GuestIntelligenceReport(
             enrichment=enrichment,
             biography_timeline=timeline,
-            covered_angles=(
-                intel_data.get("covered_angles")
-                or intel_data.get("coveredAngles")
-                or []
-            ),
-            untapped_angles=(
-                intel_data.get("untapped_angles")
-                or intel_data.get("untappedAngles")
-                or []
-            ),
+            covered_angles=covered_angles,
+            untapped_angles=untapped_angles,
+            prior_questions_asked=prior_questions,
             public_stances=stances,
             contradictions=contradictions,
         )

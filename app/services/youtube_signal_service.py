@@ -10,16 +10,15 @@ import re
 import os
 import httpx
 import logging
+from app.services.youtube_key_manager import YouTubeKeyManager
 
 logger = logging.getLogger(__name__)
-
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3"
 
 class YouTubeSignalService:
     def __init__(self):
-        self.api_key = YOUTUBE_API_KEY
-        if not self.api_key:
+        self.key_manager = YouTubeKeyManager()
+        if not self.key_manager.has_keys():
             logger.warning(
                 "CRITICAL WARNING: YOUTUBE_API_KEY is not configured in .env or system environment. "
                 "The YouTube API signal discovery will operate exclusively in high-fidelity mock data fallback mode."
@@ -28,43 +27,52 @@ class YouTubeSignalService:
             logger.info("YouTubeSignalService successfully initialized with active YOUTUBE_API_KEY.")
 
     async def _search(self, q: str, max_results: int = 10, published_after: Optional[str] = None):
-        if not self.api_key:
+        if not self.key_manager.has_keys():
             logger.warning(f"Bypassing YouTube API search for '{q}': YOUTUBE_API_KEY is missing.")
             return []
             
-        params = {
-            "part": "snippet",
-            "q": q,
-            "type": "video",
-            "maxResults": max_results,
-            "key": self.api_key,
-            "order": "viewCount"
-        }
-        if published_after:
-            params["publishedAfter"] = published_after
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(f"{YOUTUBE_API_URL}/search", params=params)
-                if resp.status_code == 403:
-                    logger.error(
-                        f"YouTube Search API FORBIDDEN (403) for query '{q}'. "
-                        f"Response: {resp.text}. This typically indicates that your YOUTUBE_API_KEY is invalid, "
-                        f"restricted, or your API daily search quota has been completely exceeded."
-                    )
-                    return []
-                elif resp.status_code != 200:
-                    logger.error(
-                        f"YouTube Search API call failed with status code {resp.status_code} for query '{q}'. "
-                        f"Response: {resp.text}"
-                    )
-                    return []
-                return resp.json().get("items", [])
-        except Exception as e:
-            logger.error(f"Network or Client error during YouTube API search for '{q}': {str(e)}")
-            return []
+        max_attempts = len(self.key_manager.keys)
+        attempts = 0
+        
+        while attempts < max_attempts:
+            current_key = self.key_manager.get_current_key()
+            params = {
+                "part": "snippet",
+                "q": q,
+                "type": "video",
+                "maxResults": max_results,
+                "key": current_key,
+                "order": "viewCount"
+            }
+            if published_after:
+                params["publishedAfter"] = published_after
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{YOUTUBE_API_URL}/search", params=params)
+                    if resp.status_code == 403:
+                        logger.error(
+                            f"YouTube Search API FORBIDDEN (403) for query '{q}'. "
+                            f"Quota likely exceeded. Rotating to next key..."
+                        )
+                        self.key_manager.mark_key_exhausted()
+                        attempts += 1
+                        continue
+                    elif resp.status_code != 200:
+                        logger.error(
+                            f"YouTube Search API call failed with status code {resp.status_code} for query '{q}'. "
+                            f"Response: {resp.text}"
+                        )
+                        return []
+                    return resp.json().get("items", [])
+            except Exception as e:
+                logger.error(f"Network or Client error during YouTube API search for '{q}': {str(e)}")
+                return []
+                
+        logger.error(f"All {max_attempts} YouTube API keys exhausted for query '{q}'.")
+        return []
 
     async def _get_video_details(self, video_ids: list):
-        if not self.api_key:
+        if not self.key_manager.has_keys():
             logger.warning("Bypassing YouTube API details fetching: YOUTUBE_API_KEY is missing.")
             return []
         if not video_ids:
@@ -74,24 +82,37 @@ class YouTubeSignalService:
         chunks = [video_ids[i:i + 50] for i in range(0, len(video_ids), 50)]
         
         async def fetch_chunk(chunk):
-            params = {
-                "part": "snippet,statistics,contentDetails",
-                "id": ",".join(chunk),
-                "key": self.api_key
-            }
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(f"{YOUTUBE_API_URL}/videos", params=params)
-                    if resp.status_code != 200:
-                        logger.error(
-                            f"YouTube Videos API details call failed with status {resp.status_code} for chunk {chunk[:5]}. "
-                            f"Response: {resp.text}"
-                        )
-                        return []
-                    return resp.json().get("items", [])
-            except Exception as e:
-                logger.error(f"Network error during YouTube API details fetching for chunk {chunk[:5]}: {str(e)}")
-                return []
+            max_attempts = len(self.key_manager.keys)
+            attempts = 0
+            
+            while attempts < max_attempts:
+                current_key = self.key_manager.get_current_key()
+                params = {
+                    "part": "snippet,statistics,contentDetails",
+                    "id": ",".join(chunk),
+                    "key": current_key
+                }
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        resp = await client.get(f"{YOUTUBE_API_URL}/videos", params=params)
+                        if resp.status_code == 403:
+                            logger.error(f"YouTube Videos API FORBIDDEN (403) for chunk. Rotating key...")
+                            self.key_manager.mark_key_exhausted()
+                            attempts += 1
+                            continue
+                        elif resp.status_code != 200:
+                            logger.error(
+                                f"YouTube Videos API details call failed with status {resp.status_code} for chunk {chunk[:5]}. "
+                                f"Response: {resp.text}"
+                            )
+                            return []
+                        return resp.json().get("items", [])
+                except Exception as e:
+                    logger.error(f"Network error during YouTube API details fetching for chunk {chunk[:5]}: {str(e)}")
+                    return []
+                    
+            logger.error(f"All {max_attempts} YouTube API keys exhausted for details chunk fetch.")
+            return []
                 
         tasks = [fetch_chunk(chunk) for chunk in chunks]
         chunk_results = await asyncio.gather(*tasks)

@@ -3,37 +3,26 @@ from typing import Optional, List, Any
 import httpx
 import asyncio
 import logging
-from typing import Optional
-from app.services.models import FREE_TIER_MODELS, FREE_MODEL_SLUGS
+import json
+import re
 from app.utils.cache import ttl_cache
 
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-FREE_MODEL_SLUGS = [
-    "deepseek/deepseek-v4-flash:free",
-    "google/gemma-4-31b-it:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "openrouter/free",
-]
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
 
+from app.core.config import settings
 
-class OpenRouterService:
+class AnthropicService:
     def __init__(self, model: Optional[str] = None):
-        self.api_key = os.getenv("OPENROUTER_API_KEY", "")
-        self.timeout = int(os.getenv("OPENROUTER_TIMEOUT", 8))
-        self.max_retries = int(os.getenv("OPENROUTER_MAX_RETRIES", 1))
-        # Enforce only free models strictly
-        configured_model = model or os.getenv("OPENROUTER_MODEL")
-        if configured_model and (configured_model.endswith(":free") or configured_model == "openrouter/free"):
-            self.model = configured_model
-        else:
-            self.model = None
-        self.timeout = 15
+        self.api_key = settings.ANTHROPIC_API_KEY or os.getenv("ANTHROPIC_API_KEY", "")
+        self.timeout = 180
         self.max_retries = 3
+        
+        self.primary_model = model or settings.MODEL_SONNET
+        self.fallback_model = settings.MODEL_HAIKU
+
 
     async def synthesize_intelligence(self, guest_name, episodes, niche_videos, tweets, web_results):
-        """
-        Synthesizes podcast intelligence using LLM.
-        """
         prompt = (
             f"""You are an expert podcast research analyst. Synthesize structured podcast intelligence for the guest: {guest_name}.
 Below is the collected raw data across multiple sources:
@@ -64,18 +53,15 @@ Return only valid JSON matching this schema, without any markdown code block for
                 raise ValueError("Expected dictionary output from LLM parse.")
             return result
         except Exception as e:
-            logging.error(f"OpenRouter synthesis failed for guest {guest_name}. Error: {e}")
+            logging.error(f"Anthropic synthesis failed for guest {guest_name}. Error: {e}")
             raise
 
     async def infer_guest_context(self, guest_name: str, guest_company: str = "") -> dict:
-        """
-        Infers the guest niche and podcast context using LLM if they are not provided by the user.
-        """
         company_str = f" from company/institution '{guest_company}'" if guest_company else ""
         prompt = (
-            f"Given the guest name '{guest_name}'{company_str}, "
-            "determine their primary niche (e.g., Neuroscience, Artificial Intelligence) "
-            "and a typical podcast context they would appear on (e.g., AI startup podcast, Health and longevity). "
+            f"Given the guest name '{guest_name}'{company_str},\n"
+            "determine their primary niche ((e.g. Crypto / Bitcoin / Web3/ AI / Frontier Tech, Macro (markets / economy / investing / Geopolitics))\n"
+            "and a typical podcast context they would appear on (e.g., AI startup podcast, Health and longevity)\n"
             "Return ONLY a valid JSON object with the keys 'guest_niche' and 'podcast_context'."
         )
         try:
@@ -86,9 +72,8 @@ Return only valid JSON matching this schema, without any markdown code block for
                     "podcast_context": result.get("podcast_context", "")
                 }
         except Exception as e:
-            logging.error(f"OpenRouter infer_guest_context failed for guest {guest_name}. Error: {e}")
+            logging.error(f"Anthropic infer_guest_context failed for guest {guest_name}. Error: {e}")
             
-        # Fallbacks based on common names for stability in demo
         guest_lower = guest_name.lower()
         if "sam altman" in guest_lower:
             return {"guest_niche": "Artificial Intelligence", "podcast_context": "AI and Tech Startups"}
@@ -98,113 +83,98 @@ Return only valid JSON matching this schema, without any markdown code block for
         return {"guest_niche": "Industry Expert", "podcast_context": "General Discussion"}
 
     async def complete_long(self, prompt: str, return_json: bool = True) -> Any:
-        """Convenience wrapper for Step 3/4 prompts that need a larger token budget."""
         return await self.complete(prompt, return_json=return_json, max_tokens=4000)
 
     @ttl_cache(ttl_seconds=300)
     async def complete(self, prompt: str, return_json: bool = True, max_tokens: int = 1024) -> Any:
         if not self.api_key:
-            logging.warning("OPENROUTER_API_KEY is not set. Raising value error to trigger fallback.")
-            raise ValueError("OPENROUTER_API_KEY is not set.")
+            logging.warning("ANTHROPIC_API_KEY is not set. Raising value error to trigger fallback.")
+            raise ValueError("ANTHROPIC_API_KEY is not set.")
         
-        model_list = [self.model] if self.model else FREE_MODEL_SLUGS
+        model_list = [self.primary_model, self.fallback_model]
         last_error = None
+        system_prompt = "You are a world-class podcast research intelligence agent. You always respond in English ONLY. Absolutely all keys, values, and narrative descriptions must be written in English. You always respond with pure, valid JSON objects conforming to the requested schema. You do not wrap your output in markdown blocks."
         
         for attempt in range(self.max_retries):
             for model_slug in model_list:
                 headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
+                    "x-api-key": self.api_key,
+                    "anthropic-version": ANTHROPIC_VERSION,
+                    "content-type": "application/json"
                 }
                 payload = {
                     "model": model_slug,
+                    "system": system_prompt,
                     "messages": [
-                        {"role": "system", "content": "You are a world-class podcast research intelligence agent. You always respond in English ONLY. Absolutely all keys, values, and narrative descriptions must be written in English. You always respond with pure, valid JSON objects conforming to the requested schema."},
                         {"role": "user", "content": prompt}
                     ],
                     "max_tokens": max_tokens,
-                    "temperature": 0.3
+                    "temperature": 0.2
                 }
                 try:
-                    logging.info(f"Trying OpenRouter model: {model_slug}")
+                    logging.info(f"Trying Anthropic model: {model_slug}")
                     async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        resp = await client.post(OPENROUTER_API_URL, headers=headers, json=payload)
+                        resp = await client.post(ANTHROPIC_API_URL, headers=headers, json=payload)
                         
                         if resp.status_code == 429:
-                            logging.warning(f"OpenRouter 429 Too Many Requests for model {model_slug}. Advancing to the next free model instantly.")
+                            logging.warning(f"Anthropic 429 Too Many Requests for model {model_slug}. Advancing to the next model instantly.")
                             last_error = ValueError(f"Model {model_slug} rate limited (429)")
                             continue
                         
-                        if resp.status_code == 402:
-                            import re
-                            error_text = resp.text
-                            match = re.search(r"can only afford (\d+)", error_text)
-                            if match:
-                                afforded = int(match.group(1))
-                                logging.warning(f"OpenRouter 402 Payment Required. Afforded: {afforded} tokens. Retrying immediately with max_tokens={afforded - 50}...")
-                                payload["max_tokens"] = max(256, afforded - 50)
-                                async with httpx.AsyncClient(timeout=self.timeout) as client_retry:
-                                    resp = await client_retry.post(OPENROUTER_API_URL, headers=headers, json=payload)
-                        
                         if resp.status_code != 200:
-                            logging.error(f"OpenRouter HTTP error {resp.status_code} for model {model_slug}: {resp.text}")
+                            logging.error(f"Anthropic HTTP error {resp.status_code} for model {model_slug}: {resp.text}")
                         resp.raise_for_status()
                         
                         data = resp.json()
                         if not isinstance(data, dict):
-                            logging.error(f"OpenRouter response is not a JSON object: {resp.text}")
-                            raise ValueError("OpenRouter returned non-dict JSON")
+                            logging.error(f"Anthropic response is not a JSON object: {resp.text}")
+                            raise ValueError("Anthropic returned non-dict JSON")
                         
-                        if "choices" not in data or not isinstance(data["choices"], list) or len(data["choices"]) == 0:
-                            logging.error(f"OpenRouter response missing choices or empty: {data}")
-                            raise KeyError("choices")
-                            
-                        first_choice = data["choices"][0]
-                        if "message" not in first_choice or "content" not in first_choice["message"]:
-                            logging.error(f"OpenRouter choice missing message content: {first_choice}")
+                        if "content" not in data or not isinstance(data["content"], list) or len(data["content"]) == 0:
+                            logging.error(f"Anthropic response missing content or empty: {data}")
                             raise KeyError("content")
                             
-                        content = first_choice["message"]["content"]
-                        logging.info(f"OpenRouter success with model: {model_slug}")
+                        first_choice = data["content"][0]
+                        if "text" not in first_choice:
+                            logging.error(f"Anthropic choice missing text: {first_choice}")
+                            raise KeyError("text")
+                            
+                        content = first_choice["text"]
+                        logging.info(f"Anthropic success with model: {model_slug}")
                         if return_json:
                             return self._safe_json(content)
                         return content
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in (401, 403):
-                        logging.critical(f"OpenRouter auth failure ({e.response.status_code}): {e.response.text}")
-                        raise ValueError(f"OpenRouter auth failure: {e.response.text}")
+                        logging.critical(f"Anthropic auth failure ({e.response.status_code}): {e.response.text}")
+                        raise ValueError(f"Anthropic auth failure: {e.response.text}")
                     elif e.response.status_code in (400, 404):
-                        logging.error(f"OpenRouter model/endpoint not found or bad request (model {model_slug}, status {e.response.status_code}). Skipping model.")
+                        logging.error(f"Anthropic model/endpoint not found or bad request (model {model_slug}, status {e.response.status_code}). Skipping model.")
                         last_error = e
                         continue
-                    logging.error(f"OpenRouter HTTP status error for model {model_slug}: {e} | Response: {e.response.text}")
+                    logging.error(f"Anthropic HTTP status error for model {model_slug}: {e} | Response: {e.response.text}")
                     last_error = e
                 except Exception as e:
-                    error_msg = f"OpenRouter API error for model {model_slug}: {e}"
+                    error_msg = f"Anthropic API error for model {model_slug}: {e}"
                     if 'resp' in locals() and hasattr(resp, 'text'):
                         error_msg += f" | Response Body: {resp.text}"
                     logging.error(error_msg)
                     last_error = e
                     
-            # If all models failed, sleep and retry
             logging.warning(f"All models failed on attempt {attempt + 1}/{self.max_retries}. Sleeping for 1 seconds before retrying...")
             await asyncio.sleep(1)
             
-        raise RuntimeError(f"OpenRouter API failed for all models after {self.max_retries} attempts. Last error: {last_error}")
+        raise RuntimeError(f"Anthropic API failed for all models after {self.max_retries} attempts. Last error: {last_error}")
 
     def clean_chinese_chars(self, data):
-        import re
         if isinstance(data, dict):
             return {k: self.clean_chinese_chars(v) for k, v in data.items()}
         elif isinstance(data, list):
             return [self.clean_chinese_chars(x) for x in data]
         elif isinstance(data, str):
-            # Translate common legal/defamation patterns
             data = data.replace("涉及诽谤风险", "defamation risks")
             data = data.replace("诽谤", "defamation")
-            # Remove any other stray Chinese characters to keep it 100% English
             cleaned = re.sub(r'[\u4e00-\u9fff]+', '', data)
-            # Clean up any trailing "or " or "and " or double spaces resulting from stripping
             cleaned = re.sub(r'\s+or\s*$', '', cleaned)
             cleaned = re.sub(r'\s+and\s*$', '', cleaned)
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()
@@ -212,9 +182,6 @@ Return only valid JSON matching this schema, without any markdown code block for
         return data
 
     def _safe_json(self, content: str) -> dict:
-        import json
-        import re
-        
         if not content or not isinstance(content, str):
             logging.warning("No content or non-string content returned from LLM. Returning fallback dict structure.")
             return {"summary": "No content returned from LLM."}
@@ -223,33 +190,25 @@ Return only valid JSON matching this schema, without any markdown code block for
         parsed = None
 
         def clean_json_text(s: str) -> str:
-            # 1. Replace smart/curly quotes with standard straight quotes
             s = s.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
-            
-            # 2. Escape literal newlines inside double-quoted string values
             def escape_newlines(m):
                 return m.group(0).replace('\n', '\\n').replace('\r', '\\r')
             s = re.sub(r'"(?:[^"\\]|\\.)*"', escape_newlines, s)
-            
-            # 3. Clean up trailing commas in objects and arrays
             s = re.sub(r',\s*\]', ']', s)
             s = re.sub(r',\s*\}', '}', s)
             return s
 
-        # Pass 1: Try direct parsing on raw content
         try:
             parsed = json.loads(content_str)
         except Exception:
             pass
 
-        # Pass 2: Try parsing raw content cleaned
         if not parsed:
             try:
                 parsed = json.loads(clean_json_text(content_str))
             except Exception:
                 pass
 
-        # Pass 3: Try parsing markdown code blocks
         if not parsed:
             match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content_str, re.DOTALL)
             if match:
@@ -263,7 +222,6 @@ Return only valid JSON matching this schema, without any markdown code block for
                     except Exception:
                         pass
 
-        # Pass 4: Try parsing with any curly braces block in raw/cleaned content
         if not parsed:
             match_braces = re.search(r"(\{.*\})", content_str, re.DOTALL)
             if match_braces:
@@ -277,9 +235,8 @@ Return only valid JSON matching this schema, without any markdown code block for
                     except Exception:
                         pass
 
-        # Pass 5: Reconstruct structured dictionary via regex key-value extraction (bulletproof fallback)
         if not parsed or not isinstance(parsed, dict):
-            logging.warning("JSON loads failed. Reconstructing structured dictionary via bulletproof regex key-value extraction.")
+            logging.warning("JSON loads failed. Reconstructing structured dictionary via regex key-value extraction.")
             extracted_dict = {}
             cleaned_raw = clean_json_text(content_str)
             
@@ -288,12 +245,10 @@ Return only valid JSON matching this schema, without any markdown code block for
                 match = re.search(pattern, cleaned_raw, re.DOTALL | re.IGNORECASE)
                 if match:
                     val_part = match.group(1).strip()
-                    # A. String Value
                     if val_part.startswith('"'):
                         str_match = re.search(r'^"((?:[^"\\]|\\.)*)"', val_part, re.DOTALL)
                         if str_match:
                             extracted_dict[key] = str_match.group(1).replace('\\n', '\n').replace('\\"', '"')
-                    # B. List of Strings
                     elif val_part.startswith('['):
                         arr_match = re.search(r'^\[(.*?)\]', val_part, re.DOTALL)
                         if arr_match:
@@ -303,7 +258,6 @@ Return only valid JSON matching this schema, without any markdown code block for
                                 items = re.findall(r"'((?:[^'\\]|\\.)*)'", items_str)
                             extracted_dict[key] = [item.replace('\\"', '"') for item in items]
                     
-                    # C. Special Array of Objects extraction (trending_podcast_episodes)
                     if key == "trending_podcast_episodes" and val_part.startswith('['):
                         objs_str_match = re.search(r'^\[(.*?)\]', val_part, re.DOTALL)
                         if objs_str_match:
@@ -322,13 +276,11 @@ Return only valid JSON matching this schema, without any markdown code block for
                                 extracted_dict[key] = objs
                                 
             if extracted_dict and "summary" in extracted_dict:
-                logging.info("Reconstructed structured dictionary successfully using regex extraction.")
                 parsed = extracted_dict
 
         if parsed and isinstance(parsed, dict):
             return self.clean_chinese_chars(parsed)
             
-        # Last resort fallback: map raw output as summary
         logging.warning("Regex extraction yielded nothing. Returning raw output mapped to summary.")
         return self.clean_chinese_chars({"summary": content})
 

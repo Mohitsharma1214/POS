@@ -152,6 +152,26 @@ export interface TwitterIntelligence {
   twitter_handle?: string;
 }
 
+export interface LinkedInSignal {
+  post_text: string;
+  author: string;
+  published_at?: string;
+  likes?: number;
+  comments?: number;
+  reposts?: number;
+  url?: string;
+  is_simulated?: boolean;
+}
+
+export interface LinkedInIntelligence {
+  raw_signals: LinkedInSignal[];
+  viral_themes: string[];
+  professional_sentiment: string;
+  persona_delta: string;
+  is_simulated?: boolean;
+  linkedin_profile_url?: string;
+}
+
 export interface PodcastIntelligenceOutput {
   guest_name?: string;
   inferred_niche?: string;
@@ -162,6 +182,7 @@ export interface PodcastIntelligenceOutput {
   reddit_discussions: RedditDiscussion[];
   instagram_intelligence: InstagramIntelligence;
   twitter_intelligence?: TwitterIntelligence;
+  linkedin_intelligence?: LinkedInIntelligence;
   similar_guests: SimilarGuest[];
   viral_topics: ViralTopic[];
   cross_platform_narratives: NarrativeCluster[];

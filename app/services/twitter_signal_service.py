@@ -54,16 +54,39 @@ class TwitterSignalService:
             }
             
             try:
-                import asyncio
                 # Run the actor and wait for it to finish
-                run = await asyncio.wait_for(self.apify_client.actor("apidojo/tweet-scraper").call(run_input=run_input), timeout=5.0)
+                run = await self.apify_client.actor("apidojo/tweet-scraper").call(run_input=run_input)
+                
+                try:
+                    if isinstance(run, dict):
+                        raw_run_dict = run
+                    else:
+                        raw_run_dict = run.model_dump() if hasattr(run, "model_dump") else run.dict() if hasattr(run, "dict") else vars(run)
+                        
+                    logger.info(f"RAW RUN DUMP: {raw_run_dict}")
+                    
+                    run_status = raw_run_dict.get("status", "UNKNOWN")
+                    dataset_id = raw_run_dict.get("defaultDatasetId") or raw_run_dict.get("default_dataset_id") or "UNKNOWN"
+                except Exception:
+                    run_status = "UNKNOWN"
+                    dataset_id = "UNKNOWN"
+                    
+                logger.info(f"Twitter Run Status: {run_status}")
+                logger.info(f"Twitter Dataset ID: {dataset_id}")
+                
+                if dataset_id == "UNKNOWN":
+                    raise Exception(f"Failed to find dataset ID. Available keys: {list(raw_run_dict.keys()) if 'raw_run_dict' in locals() else 'None'}")
                 
                 # Fetch results from the dataset
-                dataset = self.apify_client.dataset(run["defaultDatasetId"])
+                dataset = self.apify_client.dataset(dataset_id)
                 dataset_items = await dataset.list_items()
-                raw_results = dataset_items.items
-            except Exception as e:
-                logger.error(f"Apify tweet-scraper failed: {e}")
+                raw_results = dataset_items.items or []
+                
+                logger.info(f"Twitter Dataset Count: {len(raw_results)}")
+                if raw_results:
+                    logger.info(f"Twitter First Item Keys: {list(raw_results[0].keys())}")
+            except Exception:
+                logger.exception("Apify tweet-scraper failed")
 
         # Fallback to mock tweets if failed or API key missing
         if not raw_results or len(raw_results) == 0:
@@ -84,18 +107,29 @@ class TwitterSignalService:
                 continue
                 
             url = item.get("url", "")
-            author = item.get("author", {})
-            author_username = author.get("userName", username or "TwitterUser")
+            author = item.get("author") or {}
+            author_username = (
+                author.get("userName")
+                or author.get("username")
+                or username
+                or "TwitterUser"
+            )
             tweet_id = item.get("id", f"tweet_{count}")
             
             likes = item.get("likeCount", 0)
             retweets = item.get("retweetCount", 0)
             replies = item.get("replyCount", 0)
-            views = item.get("viewCount", 0)
+            views = (
+                item.get("viewCount")
+                or item.get("views")
+                or 0
+            )
             bookmarks = item.get("bookmarkCount", 0)
             
             created_at = item.get("createdAt", (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2 + count * 4)).strftime("%Y-%m-%dT%H:%M:%SZ"))
             engagement_score = (likes + (retweets * 2) + (replies * 1.5) + (bookmarks * 2)) / max(views, 1)
+            
+            logger.info(f"Processing tweet {tweet_id} likes={likes} retweets={retweets}")
             
             normalized.append({
                 "tweet_id": str(tweet_id),

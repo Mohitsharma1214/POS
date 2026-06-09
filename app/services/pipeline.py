@@ -55,54 +55,41 @@ class PipelineResult:
 # ---------------------------------------------------------------------------
 
 def _get_client_and_model_id(model: str):
-    """Return a (base_url, api_key, model_id) tuple for the given model.
-
-    * Groq models are under ``https://api.groq.com/openai/v1`` and the model id
-      is the portion after the ``groq/`` prefix.
-    * All other models are routed through OpenRouter (``https://openrouter.ai/api/v1``).
-    """
-    if model.startswith("groq/"):
-        base_url = "https://api.groq.com/openai/v1"
-        api_key = os.getenv("GROQ_API_KEY", "")
-        model_id = model.replace("groq/", "")
-    else:
-        base_url = "https://openrouter.ai/api/v1"
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
-        model_id = model  # OpenRouter expects the full slug (including provider)
+    base_url = "https://api.anthropic.com/v1"
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    model_id = model
     return base_url, api_key, model_id
 
 
 def call_model(model: str, prompt: str) -> str:
     """Synchronously call the LLM endpoint and return the raw text response.
-
-    The function uses ``httpx`` for a simple POST request compatible with both
-    OpenRouter and Groq (they share the OpenAI‑compatible chat endpoint).
+    The function uses ``httpx`` to hit the Anthropic API.
     """
     base_url, api_key, model_id = _get_client_and_model_id(model)
     if not api_key:
         raise ValueError(f"API key missing for model {model}")
 
     headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
     }
 
     payload = {
         "model": model_id,
+        "system": "You are a helpful assistant that returns pure JSON as instructed.",
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant that returns pure JSON as instructed."},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
-        "max_tokens": 1500,  # reduced to lower payload size and speed
+        "max_tokens": 4000,
     }
 
     try:
-        response = httpx.post(f"{base_url}/chat/completions", json=payload, headers=headers, timeout=30.0)
+        response = httpx.post(f"{base_url}/messages", json=payload, headers=headers, timeout=30.0)
         response.raise_for_status()
         data = response.json()
-        # OpenAI‑compatible response shape
-        content = data["choices"][0]["message"]["content"]
+        content = data["content"][0]["text"]
         return content
     except httpx.HTTPStatusError as e:
         logging.error(f"HTTP error from {model} ({e.response.status_code}): {e.response.text}")

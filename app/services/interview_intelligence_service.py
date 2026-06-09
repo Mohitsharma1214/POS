@@ -1,10 +1,11 @@
 import logging
 from typing import Dict, Any
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 class InterviewIntelligenceService:
     def __init__(self):
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm = AnthropicService(model=settings.MODEL_OPUS)
 
     async def generate_dynamic_follow_ups(self, main_question: str, possible_guest_answer: str) -> Dict[str, Any]:
         """
@@ -96,7 +97,7 @@ Return ONLY a valid JSON object matching this schema exactly, without any markdo
 }}
 """
         try:
-            result = await self.openrouter.complete(prompt, return_json=True, max_tokens=1500)
+            result = await self.llm.complete(prompt, return_json=True, max_tokens=1500)
             if not isinstance(result, dict):
                 raise ValueError("Expected dictionary output from LLM parse.")
             return result

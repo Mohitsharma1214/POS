@@ -2,6 +2,7 @@
 
 import json
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 
 from app.schemas.virality_brief_schema import (
@@ -14,13 +15,14 @@ from app.schemas.virality_brief_schema import (
     ViralityBriefReport,
     ViralityBriefResponse,
 )
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 logger = logging.getLogger(__name__)
 
 class ViralityBriefService:
     def __init__(self):
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm = AnthropicService(model=settings.MODEL_SONNET)
 
     async def generate_virality_brief(
         self,
@@ -28,7 +30,8 @@ class ViralityBriefService:
         guest_niche: Optional[str] = None,
         cached_patterns: Optional[dict] = None,
         cached_intelligence: Optional[dict] = None,
-        cached_comments: Optional[list] = None
+        cached_comments: Optional[list] = None,
+        cached_signals: Optional[dict] = None
     ) -> ViralityBriefResponse:
         """
         Generates a complete, evidence-backed Virality Brief Report.
@@ -40,115 +43,157 @@ class ViralityBriefService:
         patterns_data = cached_patterns or {}
         intel_data = cached_intelligence or {}
         comments_data = cached_comments or []
+        signals_data = cached_signals or {}
 
-        # 1. Synthesize Mega-Prompt for OpenRouter
-        prompt = f"""You are the ultimate creative director, viral packaging consultant, and elite audience retention specialist.
+        # 1. Synthesize Mega-Prompt Part 1 (Questions and Titles)
+        prompt_part1 = f"""You are the ultimate creative director and elite audience retention specialist.
         Your task is to synthesize all preceding research components for guest: {guest_name} (Niche: {guest_niche or "General"})
-        into a master-level "Virality Brief Playbook" designed to maximize podcast CTR, watch time, and clip shares.
+        into a master-level "Virality Brief Playbook".
 
         Research Dossier Context:
-        - **Pattern Extraction (Title formulas, thumbnails, questions, retention strategies)**:
+        - **Pattern Extraction**:
           {json.dumps(patterns_data, indent=2)}
-        - **Guest Intelligence (Bio, biography timeline, covered angles, untapped angles, stances, contradictions)**:
+        - **Guest Intelligence**:
           {json.dumps(intel_data, indent=2)}
-        - **Audience Demand (Raw comments, objections, commenter questions, requests)**:
+        - **Audience Demand**:
           {json.dumps(comments_data, indent=2)[:8000]}
+        - **Full Cross-Platform Signals**:
+          {json.dumps(signals_data, indent=2)[:20000]}
 
-        Directives for 100% Perfect, Elite Quality Output:
+        Directives for Part 1:
         
         1. **Optimized Questions (Provide exactly 10 questions)**:
            - Each and every question must be a masterwork of investigative interviewing. Avoid simple, generic, or yes/no questions.
-           - Crucial Comprehensive Integration: For EACH of the 10 questions, you MUST systematically and explicitly weave together **EVERY single research component** collected in our application:
-             - **Biographical Timeline Context (Step 3)**: Directly reference a specific milestone, period, or timeline shift from the guest's chronological life history.
-             - **Untapped Narrative Angle (Step 3)**: Pivot the question into a highly original, under-explored theme that prior interviewers completely missed.
-             - **Verbatim Public Quote (Step 3)**: Cite the guest's exact public quote verbatim (e.g., "In your prior public remarks, you declared: '[Verbatim Quote]'").
-             - **Dialectic Paradox / Contradiction (Step 3)**: Directly challenge them on the friction between that quote/stance and a contradictory business practice or conflicting stance (Thesis vs. Antithesis).
-             - **Audience Objection / Comment Ingestion (Step 1)**: Explicitly raise a specific objection, complaint, or commenter question mined from live YouTube comments and Reddit threads (e.g., "However, developers in your YouTube comments and Reddit discussions have raised the strong objection that...").
-             - **Competitor Niche Benchmarks (Step 1)**: Contrast their strategy with competitor video trends or niche benchmarking metrics analyzed in our signals (e.g., "Given that niche video benchmarks show competitors successfully utilizing...").
-           - Reconstruct these 6 elements into a highly polished, multi-sentence, elite investigative question setup. Canned PR talking points and oversaturated angles must be 100% filtered out.
-           - In the "origin_signal" field, you must explicitly document the trace of data combined (e.g., "Timeline [X] + Quote [Y] + Paradox [Z] + YouTube Objection [A] + Competitor Benchmark [B]").
+           - Crucial Comprehensive Integration: For EACH of the 10 questions, you MUST systematically and explicitly weave together **AT LEAST 3 of the following research components** collected in our application:
+             - **Biographical Timeline Context (Step 3)**
+             - **Untapped Narrative Angle (Step 3)**
+             - **Verbatim Public Quote (Step 3)**
+             - **Dialectic Paradox / Contradiction (Step 3)**
+             - **Audience Objection / Comment Ingestion (Step 1)**
+             - **Competitor Niche Benchmarks (Step 1)**
+             - **Highest Replayed Viral Moment (Step 4)**
+           - Reconstruct these elements into a highly polished, conversational, extremely concise, and punchy question setup (MAXIMUM 2-3 short sentences total). Do not write long paragraphs.
+           - CRITICAL AVOIDANCE: Do not ask past questions.
+             {json.dumps(intel_data.get('prior_questions_asked', []), indent=2)}
+           - In the "origin_signal" field, explicitly document the trace of data combined.
 
         2. **High-Impact Title Variants (Provide exactly 10 titles)**:
            - Absolutely NO placeholder text, generic template labels, or brackets.
            - Must strictly leverage the **Title Formulas and Patterns** extracted in Step 2.
-           - Must be click-worthy, implementing high-CTR triggers (Curiosity Gap, Metric Shock, Paradox, Contrarian).
+           - Must be click-worthy, implementing high-CTR triggers.
 
-        3. **High-Contrast Thumbnail Concepts (Provide exactly 8 concepts)**:
-           - Must strictly utilize the **Thumbnail Patterns** identified in Step 2.
-           - Design concrete contrast visual layouts specifying facial expressions, color hex codes, background graphics, and bold text overlay.
-
-        4. **Dynamic Opening Hook Scripts (Provide exactly 5 scripts)**:
-           - Must utilize the **Hook Structures** and pacing patterns from Step 2.
-           - Sound dramatic, natural, and compelling, written in first person for the host. Include detailed pacing and B-roll visual cues.
-
-        5. **Clip Segment Angles (Provide exactly 8 segment setups)**:
-           - Outline segment trigger statements and platform-specific metrics.
-
-        6. **Content Calendar**: A weekly suggested calendar.
-
-        Using this real research footprint, generate a PURE JSON response matching the ViralityBriefReport schema exactly:
+        Generate a PURE JSON response matching this schema:
         {{
             "optimized_questions": [
                {{
-                  "primary_question": "Short, punchy, conversational opening question. Written exactly as a human host would speak it naturally.",
-                    "follow_ups": ["If they say X, ask Y", "If they say A, ask B"],
-                  "objective": "Deep strategic interview objective",
-                  "origin_signal": "Extracted from comments objection [X] + Stance [Y] + Contradiction [Z]",
+                  "primary_question": "...",
+                  "follow_ups": ["..."],
+                  "objective": "...",
+                  "origin_signal": "...",
                   "retention_potential": 0.98
                }}
             ],
             "title_variants": [
                {{
-                  "title": "High-impact video title variant citing exact concepts (NO placeholders)",
-                  "trigger_type": "Curiosity Gap / Contrarian / FOMO / Metric Shock",
+                  "title": "...",
+                  "trigger_type": "...",
                   "predicted_ctr": 12.8
                }}
-            ],
+            ]
+        }}
+        """
+
+        # 2. Synthesize Mega-Prompt Part 2 (Thumbnails, Hooks, Clips, Calendar)
+        prompt_part2 = f"""You are the ultimate creative director and viral packaging consultant.
+        Your task is to synthesize research for guest: {guest_name} (Niche: {guest_niche or "General"}).
+
+        Research Dossier Context:
+        - **Pattern Extraction**: {json.dumps(patterns_data, indent=2)}
+        - **Audience Demand**: {json.dumps(comments_data, indent=2)[:5000]}
+
+        Directives for Part 2:
+        
+        1. **High-Contrast Thumbnail Concepts (Provide exactly 8 concepts)**:
+           - Must strictly utilize the **Thumbnail Patterns** identified in Step 2.
+           - Design concrete contrast visual layouts specifying facial expressions, colors, and text overlay.
+
+        2. **Dynamic Opening Hook Scripts (Provide exactly 5 scripts)**:
+           - Must utilize the **Hook Structures** from Step 2.
+           - Sound dramatic, natural, written in first person for the host. 
+
+        3. **Clip Segment Angles (Provide exactly 8 segment setups)**:
+           - Outline segment trigger statements and platform-specific metrics.
+
+        4. **Content Calendar**: A weekly suggested calendar.
+
+        Generate a PURE JSON response matching this schema:
+        {{
             "thumbnail_concepts": [
                {{
-                  "concept_name": "Short concept name",
-                  "visual_description": "Concrete outline of faces, text layouts, lighting, colors, background elements (No placeholders)",
-                  "text_overlay": "Bold contrast text copy",
-                  "accent_color": "#FF0055 / #00FFCC / #FFDD00"
+                  "concept_name": "...",
+                  "visual_description": "...",
+                  "text_overlay": "...",
+                  "accent_color": "..."
                }}
             ],
             "hook_scripts": [
                {{
-                  "hook_type": "Story Loop / Metric Shock / Paradox Debate",
-                  "script_text": "0-60 second high-impact script written in first person for host to read. Sound dramatic, natural, and compelling.",
-                  "pacing_notes": "Tone directions, dramatic pauses, speed notes",
-                  "visual_cue": "Specific visual edits, camera angles, zooms, and B-roll notes"
+                  "hook_type": "...",
+                  "script_text": "...",
+                  "pacing_notes": "...",
+                  "visual_cue": "..."
                }}
             ],
             "clip_angles": [
                {{
-                  "title": "Viral clip title",
-                  "description": "Engaging thesis or clip breakdown",
-                  "trigger_statement": "The exact controversial or highly relevant statement that hooks the viewer",
+                  "title": "...",
+                  "description": "...",
+                  "trigger_statement": "...",
                   "virality_score": 0.94,
-                  "platforms": ["TikTok", "YouTube Shorts", "Reels"]
+                  "platforms": ["TikTok"]
                }}
             ],
             "content_calendar": [
                {{
-                  "day": "Day 1 / Day 3 / Day 5",
-                  "content_type": "Short Form / Full Episode / Community Post / Reel",
-                  "angle_topic": "Specific viral hook topic to publish",
-                  "optimal_time": "12:00 PM EST / 5:30 PM EST"
+                  "day": "Day 1",
+                  "content_type": "Short Form",
+                  "angle_topic": "...",
+                  "optimal_time": "12:00 PM EST"
                }}
             ]
         }}
-
-        Output MUST be written in English only. Conform strictly to Pydantic field schemas. Do not wrap response in markdown code blocks.
         """
 
         try:
-            # 2. Call OpenRouter using complete_long for 4000-token structural runway
-            response = await self.openrouter.complete_long(prompt, return_json=False)
-            parsed = self._parse_brief(response)
-            if parsed:
-                logger.info(f"Successfully generated real-time synthesized Virality Brief for '{guest_name}' via OpenRouter.")
-                return ViralityBriefResponse(guest_name=guest_name, brief_report=parsed)
+            # Execute both prompts concurrently to bypass the 4000 token limit
+            logger.info("Executing concurrent OpenRouter requests for Virality Brief to bypass token limits...")
+            response_part1, response_part2 = await asyncio.gather(
+                self.llm.complete_long(prompt_part1, return_json=False),
+                self.llm.complete_long(prompt_part2, return_json=False)
+            )
+
+            # Parse both responses
+            parsed_part1 = self._parse_brief(response_part1)
+            parsed_part2 = self._parse_brief(response_part2)
+
+            # Merge the objects
+            merged_dict = {
+                "optimized_questions": parsed_part1.optimized_questions if parsed_part1 else [],
+                "title_variants": parsed_part1.title_variants if parsed_part1 else [],
+                "thumbnail_concepts": parsed_part2.thumbnail_concepts if parsed_part2 else [],
+                "hook_scripts": parsed_part2.hook_scripts if parsed_part2 else [],
+                "clip_angles": parsed_part2.clip_angles if parsed_part2 else [],
+                "content_calendar": parsed_part2.content_calendar if parsed_part2 else []
+            }
+
+            if merged_dict["optimized_questions"] or merged_dict["title_variants"]:
+                logger.info(f"Successfully generated merged Virality Brief for '{guest_name}' via concurrent requests.")
+                # We need to construct the model from the dict. Since we return ViralityBriefResponse which takes brief_report,
+                # we'll build ViralityBriefReport from merged_dict
+                from app.schemas.virality_brief_schema import ViralityBriefReport
+                brief_report_obj = ViralityBriefReport(**merged_dict)
+                return ViralityBriefResponse(guest_name=guest_name, brief_report=brief_report_obj)
+
         except Exception as e:
             logger.error(f"DIAGNOSTIC WARNING: Virality Brief synthesis failed via OpenRouter: {e}. Checking premium fallbacks.")
 
@@ -157,16 +202,96 @@ class ViralityBriefService:
         fallback_report = self._get_fallback_brief(guest_name, guest_niche)
         return ViralityBriefResponse(guest_name=guest_name, brief_report=fallback_report)
 
+    async def regenerate_single_item(
+        self,
+        item_type: str,
+        guest_name: str,
+        guest_niche: Optional[str] = None,
+        cached_patterns: Optional[dict] = None,
+        cached_intelligence: Optional[dict] = None,
+        cached_comments: Optional[list] = None,
+        cached_signals: Optional[dict] = None,
+        existing_items: Optional[list] = None
+    ) -> dict:
+        """
+        Regenerates a single specific item (e.g., one question, one title) to save tokens.
+        """
+        logger.info(f"Regenerating single {item_type} for '{guest_name}'")
+
+        patterns_data = cached_patterns or {}
+        intel_data = cached_intelligence or {}
+        comments_data = cached_comments or []
+        signals_data = cached_signals or {}
+        existing = existing_items or []
+
+        # Build specific prompt based on item_type
+        if item_type == "question":
+            target_desc = "1. **Optimized Question (Provide exactly 1 new question)**:\n- Must be a masterwork of investigative interviewing, completely different from existing questions.\n- Integrate AT LEAST 3 of: biographical timeline, untapped angles, verbatim quotes, contradictions, audience objections, or competitor benchmarks.\n- Keep the primary question setup extremely concise and punchy (MAXIMUM 2-3 short sentences total). Do not write long paragraphs.\n- Return purely as a JSON object matching the OptimizedQuestion schema."
+            existing_context = f"AVOID these existing questions:\n{json.dumps(existing, indent=2)}\n"
+        elif item_type == "title":
+            target_desc = "1. **High-Impact Title Variant (Provide exactly 1 new title)**:\n- Leverage Title Formulas extracted in Step 2.\n- Implement high-CTR triggers.\n- Return purely as a JSON object matching the TitleVariant schema."
+            existing_context = f"AVOID these existing titles:\n{json.dumps(existing, indent=2)}\n"
+        elif item_type == "thumbnail":
+            target_desc = "1. **High-Contrast Thumbnail Concept (Provide exactly 1 new concept)**:\n- Utilize Thumbnail Patterns identified in Step 2.\n- Describe concrete layouts.\n- Return purely as a JSON object matching the ThumbnailConcept schema."
+            existing_context = f"AVOID these existing concepts:\n{json.dumps(existing, indent=2)}\n"
+        elif item_type == "hook":
+            target_desc = "1. **Dynamic Opening Hook Script (Provide exactly 1 new script)**:\n- Use Hook Structures from Step 2.\n- Sound dramatic and natural.\n- Return purely as a JSON object matching the HookScript schema."
+            existing_context = f"AVOID these existing scripts:\n{json.dumps(existing, indent=2)}\n"
+        elif item_type == "clip":
+            target_desc = "1. **Clip Segment Angle (Provide exactly 1 new clip setup)**:\n- Outline segment trigger statements.\n- Return purely as a JSON object matching the ClipAngle schema."
+            existing_context = f"AVOID these existing clips:\n{json.dumps(existing, indent=2)}\n"
+        else:
+            raise ValueError(f"Unknown item_type: {item_type}")
+
+        prompt = f"""You are the ultimate creative director and viral packaging consultant.
+        Generate exactly ONE highly optimized {item_type} for guest: {guest_name} (Niche: {guest_niche or "General"}).
+
+        Research Context:
+        - Pattern Extraction: {json.dumps(patterns_data)[:2000]}
+        - Guest Intelligence: {json.dumps(intel_data)[:3000]}
+        - Audience Demand: {json.dumps(comments_data)[:3000]}
+        
+        {existing_context}
+        
+        Directives:
+        {target_desc}
+        
+        Return ONLY valid JSON (no markdown blocks, no intro text) representing the single item object.
+        """
+
+        try:
+            response = await self.llm.complete_long(prompt, return_json=False)
+            import re
+            code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL | re.IGNORECASE)
+            content = code_block_match.group(1).strip() if code_block_match else response.strip()
+            
+            try:
+                import json_repair
+                parsed = json_repair.loads(content)
+            except Exception:
+                import ast
+                parsed = ast.literal_eval(content.replace('true', 'True').replace('false', 'False').replace('null', 'None'))
+                
+            if isinstance(parsed, list) and len(parsed) > 0:
+                parsed = parsed[0]
+            
+            if isinstance(parsed, dict):
+                return parsed
+            else:
+                raise ValueError("Parsed item is not a dictionary")
+        except Exception as e:
+            logger.error(f"Failed to regenerate single {item_type}: {e}")
+            raise e
+
     def _parse_brief(self, text: str) -> Optional[ViralityBriefReport]:
         import re
-        content = text.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
+        
+        # 1. Strip markdown code blocks if the LLM wrapped it
+        code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if code_block_match:
+            content = code_block_match.group(1).strip()
+        else:
+            content = text.strip()
 
         def clean_json_text(s: str) -> str:
             # 1. Replace smart/curly quotes with standard straight quotes
@@ -200,15 +325,33 @@ class ViralityBriefService:
         if not parsed:
             match = re.search(r"(\{.*\})", content, re.DOTALL)
             if match:
+                extracted_json = match.group(1).strip()
                 try:
-                    parsed = json.loads(match.group(1).strip())
+                    parsed = json.loads(extracted_json)
                 except Exception:
                     pass
                 if not parsed:
                     try:
-                        parsed = json.loads(clean_json_text(match.group(1).strip()))
+                        parsed = json.loads(clean_json_text(extracted_json))
                     except Exception:
                         pass
+                
+                # Pass 3.5: literal_eval and json_repair
+                if not parsed:
+                    try:
+                        import json_repair
+                        parsed = json_repair.loads(extracted_json)
+                    except ImportError:
+                        pass
+                    except Exception:
+                        pass
+                    if not parsed:
+                        import ast
+                        try:
+                            eval_text = clean_json_text(extracted_json).replace('true', 'True').replace('false', 'False').replace('null', 'None')
+                            parsed = ast.literal_eval(eval_text)
+                        except Exception:
+                            pass
 
         # Pass 4: Reconstruct structured dictionary via regex key-value extraction (bulletproof fallback)
         if not parsed or not isinstance(parsed, dict):
@@ -240,7 +383,7 @@ class ViralityBriefService:
                                     obj_dict = {}
                                     
                                     subkeys = []
-                                    if "optimized" in key: subkeys = ["question", "objective", "origin_signal", "originSignal", "retention_potential", "retentionPotential"]
+                                    if "optimized" in key: subkeys = ["primary_question", "follow_ups", "question", "objective", "origin_signal", "originSignal", "retention_potential", "retentionPotential"]
                                     elif "title" in key: subkeys = ["title", "trigger_type", "triggerType", "predicted_ctr", "predictedCtr"]
                                     elif "thumbnail" in key: subkeys = ["concept_name", "conceptName", "visual_description", "visualDescription", "text_overlay", "textOverlay", "accent_color", "accentColor"]
                                     elif "hook" in key: subkeys = ["hook_type", "hookType", "script_text", "scriptText", "pacing_notes", "pacingNotes", "visual_cue", "visualCue"]

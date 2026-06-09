@@ -5,15 +5,16 @@ import logging
 from typing import List, Dict, Any, Optional
 from app.schemas.podcast_intelligence_output import ApifyScrapeEpisode
 from app.schemas.pattern_extraction_schema import PatternReport, ClipBaitMoment
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 class ClaudePatternService:
     def __init__(self):
+        from app.core.config import settings
         self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self.openrouter = OpenRouterService()
-        self.timeout = 30.0
+        self.llm = AnthropicService(model=settings.MODEL_OPUS)
+        self.timeout = 180.0
 
     async def extract_patterns(self, episodes: List[ApifyScrapeEpisode], guest_name: Optional[str] = None) -> PatternReport:
         """
@@ -96,7 +97,7 @@ Your output must be absolute, valid JSON matching the schema of PatternReport. A
 
     async def _extract_via_openrouter(self, prompt: str, guest_name: Optional[str] = None) -> PatternReport:
         try:
-            raw_result = await self.openrouter.complete(prompt)
+            raw_result = await self.llm.complete(prompt)
             if isinstance(raw_result, dict):
                 if any(k in raw_result for k in ["title_formulas", "titleFormulas", "thumbnail_patterns", "thumbnailPatterns"]):
                     return PatternReport(**self._normalize_json_keys(raw_result))

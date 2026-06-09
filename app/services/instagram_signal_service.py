@@ -16,34 +16,67 @@ class InstagramSignalService:
             self.apify_client = None
             logging.warning("APIFY_API_TOKEN not set. Instagram service will fallback to simulated signals.")
 
-    async def collect_instagram_signals(self, guest_name: str) -> Tuple[List[InstagramSignal], str]:
+    async def collect_instagram_signals(self, guest_name: str, guest_company: str = "") -> Tuple[List[InstagramSignal], str]:
         """
         Fetches Instagram signals by executing Apify's apify/instagram-scraper.
         """
         logging.info(f"Collecting Instagram signals via Apify for: {guest_name}")
         
         # 1. Discover handle first
-        username = await self.discover_instagram_handle(guest_name)
+        username = await self.discover_instagram_handle(guest_name, guest_company)
         
         raw_results = None
         if self.apify_client:
-            search_query = username if username else guest_name
-            logging.info(f"Using Apify instagram-scraper for query: '{search_query}'")
+            if not username:
+                logging.warning(
+                    f"No Instagram username found "
+                    f"for guest '{guest_name}'"
+                )
+                simulated = await self._generate_simulated_signals(
+                    guest_name
+                )
+                return simulated, ""
+
+            logging.info(f"Using Instagram username: {username}")
             
             run_input = {
-                "search": search_query,
-                "searchType": "user" if username else "hashtag",
+                "search": username,
+                "searchType": "user",
                 "resultsLimit": 10,
+                "resultsType": "posts",
+                "addParentData": False
             }
             
             try:
-                import asyncio
-                run = await asyncio.wait_for(self.apify_client.actor("apify/instagram-scraper").call(run_input=run_input), timeout=5.0)
-                dataset = self.apify_client.dataset(run["defaultDatasetId"])
+                logging.info(f"Instagram username discovered: {username}")
+                logging.info(f"Instagram Actor Input: {run_input}")
+                
+                run = await self.apify_client.actor("apify/instagram-scraper").call(run_input=run_input)
+                
+                try:
+                    if isinstance(run, dict):
+                        raw_run_dict = run
+                    else:
+                        raw_run_dict = run.model_dump() if hasattr(run, "model_dump") else run.dict() if hasattr(run, "dict") else vars(run)
+                    dataset_id = raw_run_dict.get("defaultDatasetId") or raw_run_dict.get("default_dataset_id")
+                except Exception:
+                    dataset_id = None
+                    
+                if not dataset_id:
+                    raise Exception("Failed to find dataset ID from Apify run object")
+                
+                dataset = self.apify_client.dataset(dataset_id)
                 dataset_items = await dataset.list_items()
-                raw_results = dataset_items.items
-            except Exception as e:
-                logging.error(f"Apify instagram-scraper failed: {e}")
+                raw_results = dataset_items.items or []
+                
+                logging.info(f"Instagram Dataset Count: {len(raw_results)}")
+                
+                if raw_results:
+                    logging.info(f"Instagram First Item Keys: {list(raw_results[0].keys())}")
+                    logging.info(f"Instagram First Item: {raw_results[0]}")
+                    
+            except Exception:
+                logging.exception("Apify instagram-scraper failed")
 
         # Fallback to AI simulation
         if not raw_results or len(raw_results) == 0:
@@ -87,13 +120,16 @@ class InstagramSignalService:
         signals.sort(key=lambda x: x.engagement_score or 0.0, reverse=True)
         return signals, username
 
-    async def discover_instagram_handle(self, guest_name: str) -> str:
+    async def discover_instagram_handle(self, guest_name: str, guest_company: str = "") -> str:
         """
         Discovers the guest's official Instagram handle by doing a scoped search.
         Returns the username if found, otherwise empty string.
         """
-        logging.info(f"Discovering Instagram handle for: {guest_name}")
-        query = f'site:instagram.com "{guest_name}"'
+        logging.info(f"Discovering Instagram handle for: {guest_name} ({guest_company})")
+        if guest_company:
+            query = f'Instagram {guest_name} "{guest_company}" OR site:instagram.com "{guest_name}" "{guest_company}"'
+        else:
+            query = f'Instagram {guest_name} OR site:instagram.com "{guest_name}"'
         try:
             results = await self.tavily.search_web(query, max_results=5)
             blacklist = {"p", "reel", "reels", "stories", "explore", "developer", "login", "about", "legal", "direct", "terms", "privacy", "blog"}
@@ -102,10 +138,8 @@ class InstagramSignalService:
                 url = getattr(item, "url", "") if not isinstance(item, dict) else item.get("url", "")
                 title = getattr(item, "title", "") if not isinstance(item, dict) else item.get("title", "")
                 
-                # Check for standard profile URL: https://www.instagram.com/username/
-                match = re.search(r'instagram\.com/([a-zA-Z0-9_\.]+)/?$', url)
-                if not match:
-                    match = re.search(r'instagram\.com/([a-zA-Z0-9_\.]+)/?(\?.*)?$', url)
+                # Check for standard profile URL: https://www.instagram.com/username/ or https://www.instagram.com/username/p/
+                match = re.search(r'instagram\.com/([a-zA-Z0-9_\.]+)', url)
                 
                 if match:
                     username = match.group(1).strip()
@@ -147,8 +181,9 @@ Provide a structured JSON response containing a list under the key "signals". Ea
 Respond ONLY with valid JSON.
 """
         try:
-            from app.services.openrouter_service import OpenRouterService
-            openrouter = OpenRouterService()
+            from app.services.anthropic_service import AnthropicService
+            from app.core.config import settings
+            openrouter = AnthropicService(model=settings.MODEL_HAIKU)
             parsed = await openrouter.complete(prompt, return_json=True)
             
             if isinstance(parsed, str):

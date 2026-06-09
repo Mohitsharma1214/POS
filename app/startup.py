@@ -10,10 +10,9 @@ def on_startup():
     
     # Run API diagnostics
     youtube_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip() or settings.ANTHROPIC_API_KEY
     tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
-    x_username = os.getenv("X_USERNAME", "").strip() or settings.X_USERNAME
-    x_password = os.getenv("X_PASSWORD", "").strip() or settings.X_PASSWORD
+    apify_token = os.getenv("APIFY_API_TOKEN", "").strip() or settings.APIFY_API_TOKEN
     
     print("\n" + "=" * 80)
     print("              PODCAST INTELLIGENCE API READINESS DIAGNOSTIC REPORT")
@@ -29,14 +28,14 @@ def on_startup():
         print("              All YouTube search data and comments will run via high-fidelity fallback mock pipelines.")
     print("-" * 80)
     
-    # 2. OpenRouter API Key Check
-    if openrouter_key:
-        print(f"  [ OK ] OPENROUTER_API_KEY: ACTIVE (Found: '{openrouter_key[:8]}...{openrouter_key[-4:] if len(openrouter_key) > 4 else ''}')")
+    # 2. Anthropic API Key Check
+    if anthropic_key:
+        print(f"  [ OK ] ANTHROPIC_API_KEY:  ACTIVE (Found: '{anthropic_key[:8]}...{anthropic_key[-4:] if len(anthropic_key) > 4 else ''}')")
         print("         STATUS: LLM deep synthesis, transcript question extraction, and Step 4 playbooks active.")
     else:
-        print("  [ MISSING ] OPENROUTER_API_KEY: MISSING")
+        print("  [ MISSING ] ANTHROPIC_API_KEY:  MISSING")
         print("              CRITICAL ERROR: LLM question extraction, Step 2 Pattern Report, and")
-        print("              Step 4 Virality Brief generation will fail! Please configure your OpenRouter key.")
+        print("              Step 4 Virality Brief generation will fail! Please configure your Anthropic key.")
     print("-" * 80)
     
     # 3. Tavily API Key Check
@@ -48,15 +47,19 @@ def on_startup():
         print("              WARNING: Web discovery is offline. Web signal/Reddit lists will run on fallbacks.")
     print("-" * 80)
     
-    # 4. Twitter / X Credentials Check
-    if x_username and x_password:
-        print(f"  [ OK ] X_CREDENTIALS:      ACTIVE (Username: '{x_username}')")
-        print("         STATUS: Live X/Twitter signal scraping via Twikit is active.")
+
+    
+    # 5. Apify Token Check
+    if apify_token:
+        print(f"  [ OK ] APIFY_API_TOKEN:    ACTIVE (Found: '{apify_token[:8]}...{apify_token[-4:] if len(apify_token) > 4 else ''}')")
+        print("         STATUS: Live Twitter, LinkedIn, Instagram, and Reddit scraping via Apify is active.")
     else:
-        print("  [ MISSING ] X_CREDENTIALS:      Bypassed")
-        print("              WARNING: Live Twitter scraping is offline.")
-        print("              Ensure both X_USERNAME and X_PASSWORD are set in your .env file to enable live scraping.")
-        
+        print("  [ MISSING ] APIFY_API_TOKEN:    Bypassed")
+        print("              WARNING: Real-time scraping is offline for major social platforms.")
+        print("              Will run on high-fidelity mock data fallback.")
+    print("-" * 80)
+    
+
     print("=" * 80)
     print("  * For absolute real-time mock-free execution, ensure all keys above are [ OK ].")
     print("=" * 80 + "\n")

@@ -12,6 +12,7 @@ class GuestInput(BaseModel):
     cached_patterns: Optional[dict] = Field(None)
     cached_intelligence: Optional[dict] = Field(None)
     cached_comments: Optional[list] = Field(None)
+    cached_signals: Optional[dict] = Field(None)
 
 
 

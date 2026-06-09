@@ -3,7 +3,7 @@
 
 import re
 from youtube_transcript_api import YouTubeTranscriptApi
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 from app.utils.cache import ttl_cache
 from typing import List
@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 class YouTubeTranscriptService:
     def __init__(self):
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm = AnthropicService(model=settings.MODEL_HAIKU)
 
     @ttl_cache(ttl_seconds=300)
     async def get_interviewer_questions(self, video_id: str, video_title: str, video_description: str = "") -> List[str]:
@@ -44,17 +45,22 @@ class YouTubeTranscriptService:
             session.headers.update(custom_headers)
             if proxy:
                 session.proxies.update({"http": proxy, "https": proxy})
-            # Monkey‑patch the library's internal session
-            YouTubeTranscriptApi._session = session
+            # Monkey‑patch the library's internal session for older versions
+            if hasattr(YouTubeTranscriptApi, '_session'):
+                YouTubeTranscriptApi._session = session
             # Exponential back‑off retry loop
             max_attempts = 4
             backoff = 2
             transcript_list = None
             for attempt in range(1, max_attempts + 1):
                 try:
-                    transcript_list = YouTubeTranscriptApi.get_transcript(
-                        video_id, languages=["en", "en-US"]
-                    )
+                    if hasattr(YouTubeTranscriptApi, 'get_transcript'):
+                        transcript_list = YouTubeTranscriptApi.get_transcript(
+                            video_id, languages=["en", "en-US"]
+                        )
+                    else:
+                        api_instance = YouTubeTranscriptApi(http_client=session)
+                        transcript_list = api_instance.fetch(video_id, languages=["en", "en-US"])
                     # Success – break out of retry loop
                     break
                 except Exception as e:
@@ -72,7 +78,11 @@ class YouTubeTranscriptService:
                         raise
             if transcript_list is None:
                 raise Exception("Failed to fetch YouTube transcript after retries.")
-            transcript_text = " ".join([t.get("text", "") for t in transcript_list])
+            
+            transcript_text = " ".join([
+                t.text if hasattr(t, 'text') else t.get("text", "") 
+                for t in transcript_list
+            ])
             logger.info(
                 f"Successfully retrieved raw transcript for video {video_id} ({len(transcript_text)} characters)."
             )
@@ -96,8 +106,8 @@ class YouTubeTranscriptService:
 
         # 2. If transcript was retrieved, use LLM to extract the exact interviewer questions
         if transcript_text:
-            # Truncate transcript to first ~30,000 characters (~5000-6000 words) to avoid excessive token costs
-            truncated_transcript = transcript_text[:30000]
+            # Truncate transcript to first ~100,000 characters (~15,000 words) to scan entire episodes for questions
+            truncated_transcript = transcript_text[:200000]
             
             prompt = f"""You are an elite podcast researcher. Analyze this transcript for the video titled "{video_title}" and extract the EXACT questions asked by the host/interviewer to the guest.
             
@@ -118,7 +128,7 @@ class YouTubeTranscriptService:
             ]
             """
             try:
-                response = await self.openrouter.complete(prompt, return_json=False)
+                response = await self.llm.complete(prompt, return_json=False)
                 import json
                 parsed = json.loads(self._clean_json(response))
                 if isinstance(parsed, list) and len(parsed) > 0:
@@ -144,7 +154,7 @@ class YouTubeTranscriptService:
             ]
             """
             try:
-                response = await self.openrouter.complete(prompt, return_json=False)
+                response = await self.llm.complete(prompt, return_json=False)
                 import json
                 parsed = json.loads(self._clean_json(response))
                 if isinstance(parsed, list) and len(parsed) > 0:
@@ -194,3 +204,77 @@ class YouTubeTranscriptService:
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
+
+    @ttl_cache(ttl_seconds=300)
+    async def get_viral_moment_question(self, video_id: str, video_title: str) -> str:
+        """
+        Uses yt-dlp to find the most replayed moment, matches it to the transcript,
+        and uses the LLM to draft a viral investigative question.
+        """
+        try:
+            import yt_dlp
+            logger.info(f"Extracting heatmap for video {video_id} using yt-dlp")
+            ydl_opts = {
+                'skip_download': True,
+                'quiet': True,
+                'extract_flat': True,
+                'dump_single_json': True
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                heatmap = info.get('heatmap')
+                
+            if not heatmap:
+                logger.info(f"No heatmap found for {video_id}")
+                return ""
+                
+            # Find the moment with the highest value
+            most_replayed = max(heatmap, key=lambda x: x.get('value', 0))
+            start_time = most_replayed.get('start_time', 0)
+            logger.info(f"Most replayed moment for {video_id} is at {start_time}s")
+            
+            # Fetch the transcript
+            if hasattr(YouTubeTranscriptApi, 'get_transcript'):
+                transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US"])
+            else:
+                transcript_list = YouTubeTranscriptApi().fetch(video_id, languages=["en", "en-US"])
+            
+            # Find the transcript chunk that surrounds this start_time (-30s to +60s)
+            target_start = max(0, start_time - 30)
+            target_end = start_time + 60
+            
+            snippet_texts = []
+            for t in transcript_list:
+                t_start = getattr(t, 'start', None) if hasattr(t, 'start') else t.get('start', 0)
+                if target_start <= t_start <= target_end:
+                    t_text = getattr(t, 'text', '') if hasattr(t, 'text') else t.get('text', '')
+                    snippet_texts.append(t_text)
+                    
+            if not snippet_texts:
+                return ""
+                
+            transcript_snippet = " ".join(snippet_texts)
+            logger.info(f"Extracted {len(transcript_snippet)} chars around the viral moment for {video_id}")
+            
+            # Draft the question using Claude
+            prompt = f"""You are an elite podcast producer preparing to interview a guest.
+            We analyzed their past YouTube interview: "{video_title}".
+            Based on YouTube's backend data, the most REPLAYED (most viral) moment of the entire video occurred during this specific transcript snippet:
+            
+            <viral_moment_transcript>
+            {transcript_snippet}
+            </viral_moment_transcript>
+            
+            Your task: Draft exactly ONE highly provocative, investigative question that targets the core insight, controversy, or revelation in this specific viral moment.
+            The question must NOT be a simple yes/no. It must challenge or build upon what they said.
+            Do not include any introductory or explanatory text. Just output the question itself.
+            """
+            
+            response = await self.llm.complete(prompt, return_json=False)
+            question = response.strip().replace('"', '')
+            logger.info(f"Drafted viral moment question: {question}")
+            return question
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract viral moment question for {video_id}: {e}")
+            return ""

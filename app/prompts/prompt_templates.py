@@ -1,4 +1,4 @@
-# Prompt templates for OpenRouter LLM
+# Prompt templates for Anthropic LLM
 
 COMMENT_CLUSTER_PROMPT = '''
 Analyze the following podcast audience clusters for:

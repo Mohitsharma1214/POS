@@ -5,15 +5,16 @@ from typing import List, Dict, Any
 import httpx
 import os
 import re
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 TAVILY_API_URL = "https://api.tavily.com/search"
 
 class SimilarGuestService:
     def __init__(self):
+        from app.core.config import settings
         self.api_key = TAVILY_API_KEY
-        self.openrouter = OpenRouterService()
+        self.llm = AnthropicService(model=settings.MODEL_OPUS)
 
     def sanitize_guest_name(self, name: str) -> str:
         if not isinstance(name, str):
@@ -107,12 +108,12 @@ For each guest, construct a JSON object with exactly the following fields:
 - "primary_platform": The primary platform where this guest communicates or holds authority (e.g. "YouTube", "Twitter/X", "Substack", "LinkedIn", "Podcast").
 
 Return a JSON object with a single key "similar_guests" containing the list of guests.
-Return ONLY valid JSON matching this schema, without any markdown code block wrapping or conversational text."""
+Return ONLY valid JSON matching this schema, without any markdown code block wrapping or conversational text. CRITICAL: Ensure all internal quotation marks are properly escaped and do NOT include any trailing commas."""
         )
 
         candidates = []
         try:
-            enrichment = await self.openrouter.complete(prompt)
+            enrichment = await self.llm.complete(prompt)
             parsed = {}
             if isinstance(enrichment, dict) and "similar_guests" in enrichment:
                 candidates = enrichment["similar_guests"]

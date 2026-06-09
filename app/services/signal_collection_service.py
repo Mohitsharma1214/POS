@@ -25,7 +25,7 @@ from app.schemas.podcast_intelligence_output import (
     RawComment,
 )
 from app.services.local_intelligence_extractor import LocalIntelligenceExtractor
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 from app.services.tavily_signal_service import TavilySignalService
 from app.services.instagram_signal_service import InstagramSignalService
 from app.services.instagram_intelligence_service import InstagramIntelligenceService
@@ -34,6 +34,10 @@ from app.services.twitter_intelligence_service import TwitterIntelligenceService
 from app.services.youtube_comment_service import YouTubeCommentService
 from app.services.youtube_signal_service import YouTubeSignalService
 from app.services.youtube_transcript_service import YouTubeTranscriptService
+from app.services.reddit_signal_service import RedditSignalService
+from app.services.linkedin_signal_service import LinkedInSignalService
+from app.services.linkedin_intelligence_service import LinkedInIntelligenceService
+
 
 
 
@@ -53,11 +57,12 @@ class SignalCollectionService:
 
         questions = getattr(v, "real_questions_asked", []) or []
         if not questions:
-            from app.services.youtube_transcript_service import YouTubeTranscriptService
             questions = YouTubeTranscriptService()._get_local_fallback_questions(
                 getattr(v, "title", ""),
                 getattr(v, "description", "") or ""
             )
+
+        most_replayed_question = getattr(v, "most_replayed_question", None)
 
         return Episode(
             title=getattr(v, "title", ""),
@@ -74,7 +79,8 @@ class SignalCollectionService:
             engagement_ratio=engagement_ratio,
             growth_velocity=growth_velocity,
             score=score,
-            real_questions_asked=questions
+            real_questions_asked=questions,
+            most_replayed_question=most_replayed_question
         )
 
 
@@ -83,10 +89,15 @@ class SignalCollectionService:
         self.comments = YouTubeCommentService()
         self.twitter = TwitterSignalService()
         self.tavily = TavilySignalService()
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm_sonnet = AnthropicService(model=settings.MODEL_SONNET)
+        self.llm_opus = AnthropicService(model=settings.MODEL_OPUS)
         self.instagram = InstagramSignalService()
         self.instagram_intelligence = InstagramIntelligenceService()
         self.twitter_intelligence = TwitterIntelligenceService()
+        self.reddit = RedditSignalService()
+        self.linkedin = LinkedInSignalService()
+        self.linkedin_intelligence = LinkedInIntelligenceService()
 
         from app.services.similar_guest_service import SimilarGuestService
         self.similar_guests_service = SimilarGuestService()
@@ -311,7 +322,7 @@ class SignalCollectionService:
         reddit_discussions = []
 
         try:
-            raw_reddit = await self.tavily.get_reddit_discussions(guest_name)
+            raw_reddit = await self.reddit.get_reddit_discussions(guest_name)
             # Limit to top 3 to keep it extremely fast and prevent rate limit exhaustion
             candidates = (raw_reddit or [])[:3]
             
@@ -336,7 +347,7 @@ class SignalCollectionService:
                 }}
                 """
                 try:
-                    enrichment = await self.openrouter.complete(enrichment_prompt)
+                    enrichment = await self.llm_sonnet.complete(enrichment_prompt)
                     enrichment = self.clean_json_response(enrichment)
                 except Exception as ex:
                     logging.error(f"Reddit enrichment LLM call failed: {ex}")
@@ -414,28 +425,31 @@ class SignalCollectionService:
         self,
         guest_name: str,
         niche: str = "",
+        guest_company: str = "",
     ) -> PodcastIntelligenceOutput:
         """
         Production pipeline:
         Aggregates all podcast intelligence signals.
         """
 
-        # Stage 1: Discover similar guests and collect general footprints in parallel
         (
             top_appearances,
             twitter_signals_tuple,
             tavily_web_signals_raw,
             similar_guests_raw,
             instagram_signals_tuple,
+            linkedin_signals_tuple,
         ) = await asyncio.gather(
             self.youtube.get_top_guest_appearances(guest_name),
             self.twitter.search_tweets(guest_name),
             self.tavily.search_web(guest_name),
             self.similar_guests_service.discover_similar_guests(guest_name),
-            self.instagram.collect_instagram_signals(guest_name),
+            self.instagram.collect_instagram_signals(guest_name, guest_company),
+            self.linkedin.get_linkedin_posts(guest_name),
         )
         instagram_signals, instagram_handle = instagram_signals_tuple
         twitter_signals_raw, twitter_handle, is_twitter_simulated = twitter_signals_tuple
+        linkedin_signals, is_linkedin_simulated = linkedin_signals_tuple
 
         # Stage 2: Extract discovered similar guests and fetch niche competitor videos featuring them
         similar_guest_names = []
@@ -464,23 +478,34 @@ class SignalCollectionService:
             similar_guests=similar_guest_names
         )
 
-        filtered_appearances = [
-            v
-            for v in top_appearances
-            if self.classify_content_type(
-                getattr(v, "title", ""),
-                getattr(v, "description", ""),
-                getattr(v, "duration", 0),
-            )
-            == "podcast"
-        ]
-        if len(filtered_appearances) < 20:
-            seen_ids = {v.video_id for v in filtered_appearances}
-            for v in top_appearances:
-                if v.video_id not in seen_ids:
+        # Sort by views descending to guarantee we process the most viral videos first
+        sorted_appearances = sorted(top_appearances, key=lambda x: getattr(x, "views", 0), reverse=True)
+
+        filtered_appearances = []
+        seen_ids = set()
+
+        # Phase 1: Extract viral podcasts
+        for v in sorted_appearances:
+            if getattr(v, "views", 0) >= 50000:  # Virality threshold
+                is_podcast = self.classify_content_type(
+                    getattr(v, "title", ""),
+                    getattr(v, "description", ""),
+                    getattr(v, "duration", 0),
+                ) == "podcast"
+                
+                if is_podcast and v.video_id not in seen_ids:
                     filtered_appearances.append(v)
                     seen_ids.add(v.video_id)
-                if len(filtered_appearances) >= 20:
+            if len(filtered_appearances) >= 15:
+                break
+
+        # Phase 2: If we haven't reached 15, allow other viral content (keynotes, speeches)
+        if len(filtered_appearances) < 15:
+            for v in sorted_appearances:
+                if getattr(v, "views", 0) >= 50000 and v.video_id not in seen_ids:
+                    filtered_appearances.append(v)
+                    seen_ids.add(v.video_id)
+                if len(filtered_appearances) >= 15:
                     break
 
         filtered_niche = [
@@ -582,7 +607,7 @@ class SignalCollectionService:
             logging.error(f"DIAGNOSTIC ERROR: Failed to run transcript question extraction loop: {ex}")
 
         try:
-            llm_intelligence = await self.openrouter.synthesize_intelligence(
+            llm_intelligence = await self.llm_opus.synthesize_intelligence(
                 guest_name=guest_name,
                 episodes=filtered_appearances,
                 niche_videos=filtered_niche,
@@ -590,17 +615,43 @@ class SignalCollectionService:
                 web_results=tavily_web_signals_raw,
             )
         except Exception as e:
-            logging.error(f"OpenRouter synthesis failed. Returning fallback intelligence. Error: {e}")
+            logging.error(f"Anthropic synthesis failed. Returning fallback intelligence. Error: {e}")
             llm_intelligence = {
                 "summary": f"Failed to generate intelligence for {guest_name} due to API limits or errors.",
-                "opportunities": [],
-                "risks": [],
-                "strategic_recommendations": [],
+                "opportunities": [
+                    "Explore tactical deep-dives into their standard workflow.",
+                    "Discuss contrarian views they hold against industry consensus."
+                ],
+                "risks": [
+                    "Avoid overly generic questions that trigger canned PR responses."
+                ],
+                "strategic_recommendations": [
+                    "Focus on defining the core problem statement before exploring solutions.",
+                    "Ask for specific metrics and measurable outcomes instead of general theories.",
+                    "Challenge assumptions by referencing competitor approaches.",
+                    "Ask them to recount a specific failure or pivot moment."
+                ],
                 "host_advisory_notes": ["API rate limits prevented full analysis. Please try again later."],
                 "viral_topics": [],
                 "youtube_data": {},
                 "podcast_context": ""
             }
+            
+        # Enforce defaults if LLM omitted keys
+        if not llm_intelligence.get("strategic_recommendations"):
+            llm_intelligence["strategic_recommendations"] = [
+                "Focus on defining the core problem statement before exploring solutions.",
+                "Ask for specific metrics and measurable outcomes instead of general theories.",
+                "Challenge assumptions by referencing competitor approaches.",
+                "Ask them to recount a specific failure or pivot moment."
+            ]
+            
+        if not llm_intelligence.get("opportunities"):
+            llm_intelligence["opportunities"] = [
+                "Explore tactical deep-dives into their standard workflow.",
+                "Discuss contrarian views they hold against industry consensus."
+            ]
+            
         structured_insights = llm_intelligence
         youtube_data = llm_intelligence.get("youtube_data", {})
         podcast_context = llm_intelligence.get("podcast_context", "")
@@ -644,7 +695,7 @@ class SignalCollectionService:
                 """
 
                 try:
-                    enrichment = await self.openrouter.complete(prompt)
+                    enrichment = await self.llm_sonnet.complete(prompt)
                     enrichment = self.clean_json_response(enrichment)
                 except Exception as ex:
                     logging.error(f"Comment analysis LLM call failed for video {video_id}: {ex}")
@@ -867,17 +918,42 @@ class SignalCollectionService:
         desired_count = 15
         if len(trending_podcast_episodes) < desired_count:
             mock_needed = desired_count - len(trending_podcast_episodes)
-            mock_episodes = self.openrouter.get_mock_trending_episodes(mock_needed)
+            mock_episodes = self.llm_sonnet.get_mock_trending_episodes(mock_needed)
             trending_podcast_episodes.extend(mock_episodes)
         # Trim to exactly desired count
         trending_podcast_episodes = trending_podcast_episodes[:desired_count]
+        # Top Guest Appearances Mapping
+        transcript_service = YouTubeTranscriptService()
+        
+        guest_episodes_mapped = []
+        for g in filtered_appearances:
+            most_replayed = await transcript_service.get_viral_moment_question(g.video_id, g.title)
+            
+            guest_episodes_mapped.append(Episode(
+                title=g.title,
+                video_id=g.video_id,
+                thumbnail_url=(g.thumbnails[0] if g.thumbnails else None),
+                video_url=f"https://www.youtube.com/watch?v={g.video_id}",
+                publish_date=g.publish_date,
+                views=g.views,
+                likes=g.likes,
+                comments_count=getattr(g, 'comments_count', 0),
+                ctr_proxy=getattr(g, 'ctr_proxy', 0.0),
+                engagement_ratio=getattr(g, 'engagement_ratio', 0.0),
+                growth_velocity=getattr(g, 'growth_velocity', 0.0),
+                score=getattr(g, 'score', 0.0),
+                channel_name=g.channel,
+                description=g.description,
+                real_questions_asked=g.real_questions_asked,
+                most_replayed_question=most_replayed
+            ))
 
         apify_scrape_episodes = []
         comment_themes_map = {}
         for insight in comment_intelligence:
             comment_themes_map[insight.video_id] = insight.recurring_themes
 
-        all_candidate_episodes = [self.to_episode(v) for v in filtered_appearances] + [
+        all_candidate_episodes = guest_episodes_mapped + [
             Episode(
                 title=t.title,
                 video_id=t.video_id,
@@ -893,7 +969,8 @@ class SignalCollectionService:
                 score=t.score,
                 channel_name=niche or guest_name,
                 description=t.description,
-                real_questions_asked=t.real_questions_asked
+                real_questions_asked=t.real_questions_asked,
+                most_replayed_question=getattr(t, "most_replayed_question", None)
             ) for t in top_niche_trends
         ]
 
@@ -917,7 +994,8 @@ class SignalCollectionService:
                     url=ep.video_url,
                     description=ep.description or f"Episode by {ep.channel_name or 'Niche Creator'}.",
                     view_count=ep.views,
-                    comment_themes=themes
+                    comment_themes=themes,
+                    most_replayed_question=getattr(ep, "most_replayed_question", None)
                 )
             )
             if len(apify_scrape_episodes) >= 20:
@@ -955,6 +1033,21 @@ class SignalCollectionService:
             twitter_handle=twitter_handle
         )
 
+        # Analyze LinkedIn signals
+        linkedin_intel_dict = await self.linkedin_intelligence.analyze_signals(
+            guest_name=guest_name,
+            raw_signals=linkedin_signals
+        )
+        from app.schemas.podcast_intelligence_output import LinkedInIntelligence
+        li_intel = LinkedInIntelligence(
+            raw_signals=linkedin_signals,
+            viral_themes=linkedin_intel_dict.get("viral_themes", []),
+            professional_sentiment=linkedin_intel_dict.get("professional_sentiment", ""),
+            persona_delta=linkedin_intel_dict.get("persona_delta", ""),
+            is_simulated=is_linkedin_simulated,
+            linkedin_profile_url=""
+        )
+
         return PodcastIntelligenceOutput(
             guest_name=guest_name,
             inferred_niche=niche,
@@ -965,6 +1058,7 @@ class SignalCollectionService:
             reddit_discussions=reddit_discussions,
             instagram_intelligence=insta_intel,
             twitter_intelligence=tw_intel,
+            linkedin_intelligence=li_intel,
             similar_guests=similar_guests,
             viral_topics=viral_topics,
             cross_platform_narratives=[],

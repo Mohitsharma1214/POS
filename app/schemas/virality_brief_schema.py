@@ -50,3 +50,17 @@ class ViralityBriefReport(BaseModel):
 class ViralityBriefResponse(BaseModel):
     guest_name: str
     brief_report: ViralityBriefReport
+
+class RegenerateItemRequest(BaseModel):
+    item_type: str = Field(..., description="The type of item to regenerate (e.g. 'question', 'title', 'thumbnail', 'hook', 'clip')")
+    guest_name: str
+    guest_niche: Optional[str] = None
+    cached_patterns: Optional[dict] = None
+    cached_intelligence: Optional[dict] = None
+    cached_comments: Optional[list] = None
+    cached_signals: Optional[dict] = None
+    existing_items: Optional[list] = Field(default_factory=list, description="Existing items to avoid duplicating")
+
+class RegenerateItemResponse(BaseModel):
+    item_type: str
+    item: dict = Field(..., description="The regenerated item matching its respective schema")

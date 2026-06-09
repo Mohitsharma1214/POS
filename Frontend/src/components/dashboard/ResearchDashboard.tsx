@@ -10,7 +10,7 @@ import {
   AlertTriangle, Layers, HelpCircle, Activity, Globe, 
   MessageCircle, Users, ExternalLink, ShieldAlert, CheckSquare, 
   Zap, Flame, Compass, Heart, Share2, BarChart2, BookOpen,
-  X, Copy, Check, SlidersHorizontal, Volume2, Maximize2, Twitter, Bot
+  X, Copy, Check, SlidersHorizontal, Volume2, Maximize2, Twitter, Bot, RefreshCw
 } from 'lucide-react';
 import type { PodcastIntelligenceOutput, GuestIntelligenceReport } from '../../types/intelligence';
 import { fetchWorkingPatterns, fetchGuestSpecificIntelligence, fetchViralityBrief } from '../../services/intelligenceService';
@@ -202,7 +202,7 @@ export default function ResearchDashboard(props: Props) {
     };
   }
 
-  const [activeTab, setActiveTab] = useState<'index' | 'strategic' | 'videos' | 'followup' | 'comments' | 'social' | 'patterns' | 'guest' | 'virality' | 'instagram' | 'twitter' | 'interview'>('index');
+  const [activeTab, setActiveTab] = useState<'index' | 'strategic' | 'videos' | 'followup' | 'comments' | 'social' | 'patterns' | 'guest' | 'virality' | 'instagram' | 'twitter' | 'linkedin' | 'interview'>('index');
   const [questionIndexMap, setQuestionIndexMap] = useState<Record<string, number>>({});
   const [activeEmbedId, setActiveEmbedId] = useState<string | null>(null);
   const [activePreviewVideo, setActivePreviewVideo] = useState<any | null>(null);
@@ -217,6 +217,7 @@ export default function ResearchDashboard(props: Props) {
 
   const handleFetchPatterns = async () => {
     if (!data?.guest_name) return;
+    setPatternReport(null);
     setLoadingPatterns(true);
     setErrorPatterns(null);
     try {
@@ -241,9 +242,53 @@ export default function ResearchDashboard(props: Props) {
   const [viralityBrief, setViralityBrief] = useState<any | null>(data?.brief || null);
   const [loadingViralityBrief, setLoadingViralityBrief] = useState(false);
   const [errorViralityBrief, setErrorViralityBrief] = useState<string | null>(null);
+  const [regeneratingItemKey, setRegeneratingItemKey] = useState<string | null>(null);
+
+  const handleRegenerateViralityItem = async (itemType: string, index: number, existingArrayKey: string) => {
+    if (!data?.guest_name || !viralityBrief) return;
+    
+    // Create a unique key like 'question-0' to show loading state
+    const key = `${itemType}-${index}`;
+    setRegeneratingItemKey(key);
+    
+    try {
+      // Import this dynamically or make sure it's imported at the top
+      const { fetchRegenerateViralityItem } = await import('../../services/intelligenceService');
+      
+      const res = await fetchRegenerateViralityItem({
+        item_type: itemType,
+        guest_name: data.guest_name,
+        guest_niche: data.top_niche_trends?.[0]?.niche || '',
+        cached_patterns: patternReport,
+        cached_intelligence: guestReport,
+        cached_comments: data.comment_intelligence || [],
+        cached_signals: data,
+        existing_items: viralityBrief[existingArrayKey] || []
+      });
+      
+      if (res && res.item) {
+        // Update the specific item in the array
+        setViralityBrief((prev: any) => {
+          if (!prev) return prev;
+          const newArray = [...(prev[existingArrayKey] || [])];
+          newArray[index] = res.item;
+          return {
+            ...prev,
+            [existingArrayKey]: newArray
+          };
+        });
+      }
+    } catch (err: any) {
+      console.error(`Failed to regenerate ${itemType}:`, err);
+      // Optional: show a toast notification here
+    } finally {
+      setRegeneratingItemKey(null);
+    }
+  };
 
   const handleFetchViralityBrief = async () => {
     if (!data?.guest_name) return;
+    setViralityBrief(null);
     setLoadingViralityBrief(true);
     setErrorViralityBrief(null);
     try {
@@ -253,7 +298,8 @@ export default function ResearchDashboard(props: Props) {
         apify_scrape_episodes: data.apify_scrape_episodes || [],
         cached_patterns: patternReport,
         cached_intelligence: guestReport,
-        cached_comments: data.comment_intelligence || []
+        cached_comments: data.comment_intelligence || [],
+        cached_signals: data
       });
       if (res && res.brief_report) {
         setViralityBrief(res.brief_report);
@@ -275,6 +321,7 @@ export default function ResearchDashboard(props: Props) {
 
   const handleFetchGuestIntelligence = async () => {
     if (!data?.guest_name) return;
+    setGuestReport(null);
     setLoadingGuest(true);
     setErrorGuest(null);
     try {
@@ -643,14 +690,15 @@ export default function ResearchDashboard(props: Props) {
           { id: 'index', icon: Layers, label: 'Dashboard Index', activeColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 shadow-lg' },
           { id: 'strategic', icon: Sparkles, label: 'Strategic Intel', activeColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20 shadow-lg' },
           { id: 'videos', icon: Play, label: 'Niche Video Library', activeColor: 'text-blue-400 bg-blue-500/10 border-blue-500/20 shadow-lg' },
-          { id: 'followup', icon: HelpCircle, label: 'Follow-Up Questions', activeColor: 'text-violet-400 bg-violet-500/10 border-violet-500/20 shadow-lg' },
-          { id: 'comments', icon: MessageCircle, label: 'Audience Mining', activeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-lg' },
+
+
           { id: 'social', icon: Globe, label: 'Social & Web', activeColor: 'text-purple-400 bg-purple-500/10 border-purple-500/20 shadow-lg' },
           { id: 'patterns', icon: Sparkles, label: 'Creative Patterns', activeColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20 shadow-lg', fetch: () => { if (!patternReport && !loadingPatterns) handleFetchPatterns() } },
           { id: 'guest', icon: User, label: 'Guest Deep-Dive', activeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-lg', fetch: () => { if (!guestReport && !loadingGuest) handleFetchGuestIntelligence() } },
           { id: 'virality', icon: Flame, label: 'Virality Playbook', activeColor: 'text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-lg', fetch: () => { if (!viralityBrief && !loadingViralityBrief) handleFetchViralityBrief() } },
           { id: 'instagram', icon: Heart, label: 'Instagram Intel', activeColor: 'text-pink-400 bg-pink-500/10 border-pink-500/20 shadow-lg' },
           { id: 'twitter', icon: Twitter, label: 'X (Twitter) Intel', activeColor: 'text-sky-400 bg-sky-500/10 border-sky-500/20 shadow-lg' },
+          { id: 'linkedin', icon: Users, label: 'LinkedIn Intel', activeColor: 'text-blue-400 bg-blue-500/10 border-blue-500/20 shadow-lg' },
           { id: 'interview', icon: Bot, label: 'Interview Intelligence', activeColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 shadow-lg' },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -832,6 +880,16 @@ export default function ResearchDashboard(props: Props) {
                       title: 'X (Twitter) Intel',
                       description: 'Real-time tweet extraction, engagement velocity scoring, narrative maps, and hashtag tracking.',
                       metrics: 'Live Feed Active',
+                      step: 'Social'
+                    },
+                    {
+                      id: 'linkedin',
+                      icon: Users,
+                      color: 'text-blue-400',
+                      bg: 'bg-blue-500/5 border-blue-500/20 hover:border-blue-500/40 hover:bg-blue-500/10 hover:shadow-blue-500/5 shadow-md',
+                      title: 'LinkedIn Intel',
+                      description: 'LinkedIn viral themes, professional sentiment summary, and persona delta comparing podcast vs LinkedIn footprint.',
+                      metrics: 'Professional Feed Active',
                       step: 'Social'
                     }
                   ]
@@ -1078,7 +1136,7 @@ export default function ResearchDashboard(props: Props) {
                   </div>
                   <h3 className="text-base font-bold text-white mb-4">Host Interview Guidelines</h3>
                   <ul className="space-y-3">
-                    {Array.isArray(data.structured_insights.strategic_recommendations) ? (
+                    {Array.isArray(data.structured_insights.strategic_recommendations) && data.structured_insights.strategic_recommendations.length > 0 ? (
                       data.structured_insights.strategic_recommendations.map((item: string, idx: number) => (
                         <li key={idx} className="flex gap-2 text-xs text-neutral-300 leading-normal">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
@@ -1345,8 +1403,8 @@ export default function ResearchDashboard(props: Props) {
                                   Real Questions Asked in Video
                                 </span>
                                 <ul className="space-y-1.5 text-xs text-neutral-300 list-disc list-inside leading-relaxed">
-                                  {ep.real_questions_asked.slice(0, 3).map((q, idx) => (
-                                    <li key={idx} className="line-clamp-2 italic">
+                                  {ep.real_questions_asked.map((q, idx) => (
+                                    <li key={idx} className="italic text-neutral-200">
                                       &quot;{q}&quot;
                                     </li>
                                   ))}
@@ -1478,8 +1536,8 @@ export default function ResearchDashboard(props: Props) {
                                   Real Questions Asked in Video
                                 </span>
                                 <ul className="space-y-1.5 text-xs text-neutral-300 list-disc list-inside leading-relaxed">
-                                  {trend.real_questions_asked.slice(0, 3).map((q, idx) => (
-                                    <li key={idx} className="line-clamp-2 italic">
+                                  {trend.real_questions_asked.map((q, idx) => (
+                                    <li key={idx} className="italic text-neutral-200">
                                       &quot;{q}&quot;
                                     </li>
                                   ))}
@@ -1524,447 +1582,9 @@ export default function ResearchDashboard(props: Props) {
           </motion.div>
         )}
 
-        {/* TAB: FOLLOW-UP QUESTIONS */}
-        {activeTab === 'followup' && (() => {
-          const synthesizedQuestions = (viralityBrief?.optimized_questions || data.brief?.optimized_questions || []).filter((q: any) => q && (q.question || q.primary_question));
-          const totalQuestions = synthesizedQuestions.length;
-
-          return (
-            <motion.div
-              key="followup"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.3 }}
-              className="space-y-8"
-            >
-              {/* Header */}
-              <div className="relative bg-gradient-to-br from-violet-950/30 via-neutral-900 to-neutral-950 border border-violet-500/20 rounded-3xl p-6 md:p-8 shadow-2xl overflow-hidden">
-                <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-violet-500 to-purple-600 rounded-l-3xl" />
-                <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-violet-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="bg-violet-500/15 text-violet-400 border border-violet-500/25 px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase flex items-center gap-1.5">
-                        <HelpCircle className="w-3 h-3" />
-                        AI-Synthesized Master Questions
-                      </span>
-                      <span className="bg-neutral-900 border border-neutral-800 text-neutral-400 px-2.5 py-1 rounded-full text-xs font-mono">
-                        {totalQuestions} high-retention questions generated
-                      </span>
-                    </div>
-                    <h2 className="text-2xl md:text-3xl font-black text-white mb-2">Deep Intelligence Follow-Ups</h2>
-                    <p className="text-sm text-neutral-400 max-w-2xl leading-relaxed">
-                      These questions are not just pulled from past transcripts. They are mathematically synthesized using the guest's entire biography, public contradictions, audience objections, and historical controversy data to maximize interview tension and retention.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="text-center">
-                      <div className="text-4xl font-black text-violet-400">{totalQuestions}</div>
-                      <div className="text-xs text-neutral-500 uppercase tracking-wider font-bold mt-1">Optimized<br/>Prompts</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Question Cards */}
-              {totalQuestions === 0 ? (
-                <div className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm rounded-3xl p-12 text-center">
-                  <HelpCircle className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
-                  <p className="text-neutral-500 text-sm">No synthesized questions available. Make sure the Virality Brief (Step 4) has finished generating.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-6">
-                  {synthesizedQuestions.map((q: any, idx: number) => {
-                    const isCopied = copySuccess === `synth-q-${idx}`;
-
-                    return (
-                      <div
-                        key={idx}
-                        className="group bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm hover:border-violet-500/30 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 flex flex-col md:flex-row"
-                      >
-                        {/* Left Side: The Question */}
-                        <div className="flex-1 p-6 md:p-8 relative">
-                          <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-violet-500/60 to-purple-600/30" />
-                          
-                          <div className="flex items-center justify-between mb-6">
-                            <span className="text-xs font-bold text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
-                              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                              Contrarian Prompt #{idx + 1}
-                            </span>
-                            {q.retention_potential && (
-                              <span className="bg-green-500/10 border border-green-500/20 text-green-400 px-2 py-1 rounded text-xs font-bold flex items-center gap-1" title="Estimated Retention Index">
-                                <Activity className="w-3 h-3" /> {(q.retention_potential * 100).toFixed(0)}% Retention
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="relative">
-                            <span className="text-neutral-800 text-7xl font-serif absolute -top-6 -left-2 select-none pointer-events-none leading-none">&ldquo;</span>
-                            <p className="relative z-10 text-lg md:text-xl font-semibold text-white leading-relaxed tracking-tight pl-6">
-                              {q.primary_question || q.question}
-                            </p>
-                          </div>
-
-                          <div className="mt-8 flex items-center">
-                            <button
-                              onClick={() => handleCopyText(q.primary_question || q.question, `synth-q-${idx}`)}
-                              className="bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/25 hover:border-violet-500/50 text-violet-400 hover:text-violet-300 px-4 py-2 rounded-xl text-xs font-bold tracking-wide uppercase transition active:scale-95 flex items-center gap-2"
-                            >
-                              {isCopied ? (
-                                <><Check className="w-4 h-4 text-emerald-400" />Copied to Clipboard!</>
-                              ) : (
-                                <><Copy className="w-4 h-4" />Copy Question</>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Right Side: The Intelligence/Metadata */}
-                        <div className="w-full md:w-[35%] bg-neutral-900/50 border-t md:border-t-0 md:border-l border-neutral-800 p-6 flex flex-col justify-center space-y-5">
-                          {q.objective && (
-                            <div>
-                              <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Strategic Objective</span>
-                              <p className="text-sm text-neutral-300 leading-relaxed italic border-l-2 border-neutral-700 pl-3 py-0.5">
-                                {q.objective}
-                              </p>
-                            </div>
-                          )}
-                          
-                          {q.supporting_evidence && (
-                            <div>
-                              <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Intelligence Source Vectors</span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {q.supporting_evidence.split('+').map((sig: string, sIdx: number) => (
-                                  <span key={sIdx} className="bg-neutral-900 border border-neutral-800 text-xs text-cyan-400/80 px-2 py-1 rounded-md">
-                                    {sig.trim()}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </motion.div>
-          );
-        })()}
-
-        {/* TAB 3: AUDIENCE & THEME MINING */}
-        {activeTab === 'comments' && (
-          <motion.div
-            key="comments"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.3 }}
-            className="space-y-8"
-          >
-            
-            {/* Collapsible inline YouTube player */}
-            <AnimatePresence>
-              {activeEmbedId && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-neutral-900 border border-emerald-500/20 rounded-2xl p-6 shadow-2xl relative overflow-hidden"
-                >
-                  <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-emerald-400 to-teal-500 shadow-glow" />
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest font-mono">Theater Active</span>
-                    </div>
-                    <button 
-                      onClick={() => setActiveEmbedId(null)}
-                      className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-red-500/40 text-neutral-400 hover:text-red-400 rounded-xl px-3 py-1.5 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5"
-                    >
-                      Close Theater
-                    </button>
-                  </div>
-                  <div className="relative aspect-video w-full max-w-4xl mx-auto rounded-xl overflow-hidden shadow-2xl border border-neutral-800">
-                    <iframe
-                      src={`https://www.youtube.com/embed/${activeEmbedId}?autoplay=1`}
-                      title="YouTube video player"
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                      className="w-full h-full"
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Comment Intelligence Segment */}
-            {Array.isArray(data.comment_intelligence) && data.comment_intelligence.length > 0 && (
-              <div className="relative bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 md:p-8 rounded-2xl shadow-xl">
-                <h3 className="text-xl font-black text-white flex items-center gap-2 mb-6">
-                  <MessageCircle className="text-emerald-400 w-5 h-5" />
-                  YouTube Audience Intelligence & Hidden Demand Signals
-                </h3>
-
-                <div className="space-y-6">
-                  {data.comment_intelligence.map((c, i) => {
-                    const id = getYoutubeId(c.video_id);
-                    const videoUrl = id ? `https://www.youtube.com/watch?v=${id}` : undefined;
-                    const thumb = getYoutubeThumbnail(c.video_id);
-
-                    return (
-                      <div key={i} className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm rounded-2xl p-6 flex flex-col lg:flex-row gap-6 hover:border-emerald-500/30 transition-all duration-300">
-                        {thumb && (
-                          <div className="relative w-full lg:w-56 aspect-video bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800 flex-shrink-0">
-                            <img src={thumb} alt="YouTube Preview" className="w-full h-full object-cover" />
-                            {id && (
-                              <button 
-                                onClick={() => setActiveEmbedId(activeEmbedId === id ? null : id)}
-                                className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-black/60 hover:bg-emerald-500 text-white flex items-center justify-center border border-white/10 transition shadow-xl"
-                              >
-                                <Play className="w-5 h-5 fill-current ml-0.5" />
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="flex-1 space-y-4">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider">
-                                Semantic Scraped Target
-                              </span>
-                              <span className="font-mono text-xs text-neutral-400">Video Ref ID: {c.video_id}</span>
-                            </div>
-                            <h4 className="font-bold text-white text-base">Audience Sentiment Analysis Map</h4>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            
-                            {/* Objections Cluster */}
-                            <div className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm/60 p-4 rounded-xl">
-                              <span className="text-xs font-bold text-red-400 uppercase tracking-wider flex items-center gap-1 mb-2">
-                                <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-                                Audience Objections & Criticisms
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {c.objections && c.objections.length > 0 ? (
-                                  c.objections.map((o, idx) => (
-                                    <span key={idx} className="bg-red-500/5 text-red-300 border border-red-500/15 px-2 py-0.5 rounded-lg text-xs leading-normal">
-                                      {o}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-neutral-600 text-xs italic">No distinct objections captured.</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Hidden Demand/Requests */}
-                            <div className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm/60 p-4 rounded-xl">
-                              <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1 mb-2">
-                                <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
-                                Requested Topics & Hidden Demand
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {c.requests && c.requests.length > 0 ? (
-                                  c.requests.map((r, idx) => (
-                                    <span key={idx} className="bg-cyan-500/5 text-cyan-300 border border-cyan-500/15 px-2 py-0.5 rounded-lg text-xs leading-normal">
-                                      {r}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-neutral-600 text-xs italic">No specific audience demand cues recorded.</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Recurring Themes */}
-                            <div className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm/60 p-4 rounded-xl md:col-span-2">
-                              <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider block mb-2">
-                                General Conversational Themes
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {c.recurring_themes && c.recurring_themes.length > 0 ? (
-                                  c.recurring_themes.map((theme, idx) => (
-                                    <span key={idx} className="bg-neutral-900 border border-neutral-800 text-neutral-300 px-2.5 py-1 rounded-lg text-xs font-medium">
-                                      {theme}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-neutral-600 text-xs italic">No recurring themes extracted.</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Two-Column Raw Comments & Commenter Questions Section */}
-                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-4 pt-6 border-t border-neutral-900 md:col-span-2">
-                              
-                              {/* Left Column: Real Comment Stream */}
-                              <div className="space-y-3">
-                                <span className="text-xs font-bold text-emerald-450 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                                  Real Comment Stream (YouTube API Ingestion)
-                                </span>
-                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
-                                  {c.raw_comments && c.raw_comments.length > 0 ? (
-                                    c.raw_comments.map((comment, cidx) => (
-                                      <div key={cidx} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl relative shadow-md hover:border-emerald-500/20 transition-all duration-300">
-                                        <div className="flex items-center justify-between mb-1.5">
-                                          <span className="text-xs font-bold text-neutral-200">@{comment.author || "youtube_user"}</span>
-                                          <span className="text-xs text-neutral-500">{comment.published_at ? comment.published_at.split('T')[0] : "Recent"}</span>
-                                        </div>
-                                        <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-                                          {comment.text}
-                                        </p>
-                                        <div className="mt-2 flex items-center gap-1 text-xs text-neutral-500 font-bold">
-                                          <ThumbsUp className="w-3.5 h-3.5 text-neutral-600 hover:text-emerald-400 transition-colors" />
-                                          <span>{comment.like_count} Likes</span>
-                                        </div>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <span className="text-neutral-600 text-xs italic">No raw comments found in this stream.</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Right Column: Viewer-Asked Questions */}
-                              <div className="space-y-3">
-                                <span className="text-xs font-bold text-cyan-455 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                                  Specific Questions Audience are Actually Asking
-                                </span>
-                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
-                                  {c.commenter_questions && c.commenter_questions.length > 0 ? (
-                                    c.commenter_questions.map((q, qidx) => (
-                                      <div key={qidx} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-xl flex items-start gap-3 shadow-md group transition-all hover:border-cyan-500/20">
-                                        <span className="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/40 flex items-center justify-center text-xs font-black flex-shrink-0 mt-0.5 shadow-inner">
-                                          Q
-                                        </span>
-                                        <div className="flex-1">
-                                          <p className="text-xs font-semibold text-neutral-250 italic leading-relaxed">
-                                            "{q}"
-                                          </p>
-                                          <button
-                                            onClick={() => handleCopyText(q, `q-${i}-${qidx}`)}
-                                            className="mt-2 text-xs font-bold text-neutral-500 hover:text-cyan-400 transition-colors flex items-center gap-1 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                          >
-                                            {copySuccess === `q-${i}-${qidx}` ? (
-                                              <><Check className="w-3 h-3 text-emerald-400" /> Copied!</>
-                                            ) : (
-                                              <><Copy className="w-3 h-3" /> Copy Question</>
-                                            )}
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <span className="text-neutral-600 text-xs italic">No specific audience-asked questions extracted from this comments section.</span>
-                                  )}
-                                </div>
-                              </div>
-
-                            </div>
 
 
-                          </div>
-                        </div>
 
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Apify Scraper Segment */}
-            {Array.isArray(data.apify_scrape_episodes) && data.apify_scrape_episodes.length > 0 && (
-              <div className="relative bg-gradient-to-br from-cyan-950/20 to-neutral-900/90 rounded-2xl shadow-xl p-6 md:p-8 border border-cyan-900/40 overflow-hidden group">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none transition-all duration-700 group-hover:bg-cyan-500/20" />
-
-                <h3 className="text-xl font-black text-white flex items-center gap-2 mb-4">
-                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shadow-inner">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  </span>
-                  Apify Scraper: Deep YouTube Metadata & Comments Tag Clouds
-                </h3>
-
-                <p className="text-sm text-neutral-400 mb-6 border-b border-neutral-800/60 pb-3">
-                  Parsed datasets representing metadata metrics and tag clouds harvested across the top 20 niche videos.
-                </p>
-
-                <div className="space-y-4">
-                  {data.apify_scrape_episodes.map((ep, i) => {
-                    const id = getYoutubeId(ep.url);
-                    const thumb = getYoutubeThumbnail(ep.url);
-                    const isEmbeddable = !!id;
-                    const isActive = activeEmbedId === id;
-
-                    return (
-                      <div key={i} className="flex flex-col md:flex-row gap-5 bg-neutral-900/60 border border-neutral-800/80 hover:border-cyan-500/40 rounded-xl p-5 hover:bg-neutral-900/60 transition-all duration-300 shadow-md">
-                        {thumb && (
-                          <div className="w-full md:w-44 h-28 flex-shrink-0 relative rounded-lg overflow-hidden border border-neutral-800">
-                            <img src={thumb} alt={ep.title} className="w-full h-full object-cover transition-transform duration-500 hover:scale-105" />
-                            {isEmbeddable && (
-                              <button 
-                                onClick={() => setActiveEmbedId(isActive ? null : id)}
-                                className="absolute inset-0 m-auto w-10 h-10 rounded-full bg-black/75 hover:bg-cyan-500 text-white flex items-center justify-center border border-white/10 transition shadow-xl"
-                              >
-                                <Play className="w-4 h-4 fill-current ml-0.5" />
-                              </button>
-                            )}
-                            {ep.view_count && (
-                              <span className="absolute bottom-2 right-2 bg-black/85 text-white px-2 py-0.5 rounded text-xs font-semibold border border-neutral-800">
-                                {ep.view_count >= 1000000 ? `${(ep.view_count / 1000000).toFixed(1)}M` : ep.view_count >= 1000 ? `${(ep.view_count / 1000).toFixed(0)}K` : ep.view_count} views
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        <div className="flex-1 flex flex-col justify-between gap-3">
-                          <div>
-                            <div className="flex items-start justify-between gap-4">
-                              <h4 className="font-bold text-neutral-100 hover:text-cyan-300 transition-colors duration-200 text-sm leading-snug">
-                                {ep.title}
-                              </h4>
-                              {ep.url && (
-                                <a href={ep.url} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-cyan-500/40 text-neutral-400 hover:text-cyan-300 transition-all">
-                                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.518 3.545 12 3.545 12 3.545s-7.518 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.87.508 9.388.508 9.388.508s7.518 0 9.388-.508a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                                  </svg>
-                                </a>
-                              )}
-                            </div>
-                            {ep.description && (
-                              <p className="text-xs text-neutral-400 mt-2 line-clamp-2 italic">
-                                {ep.description}
-                              </p>
-                            )}
-                          </div>
-                          
-                          {Array.isArray(ep.comment_themes) && ep.comment_themes.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 items-center mt-1">
-                              <span className="text-xs font-bold text-cyan-500/80 uppercase tracking-wider mr-1">Comment Themes:</span>
-                              {ep.comment_themes.map((theme, idx) => (
-                                <span key={idx} className="bg-cyan-500/10 text-cyan-300 border border-cyan-400/20 px-2 py-0.5 rounded-full text-xs font-medium transition-all hover:bg-cyan-500/20 hover:border-cyan-400/40">
-                                  {theme}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </motion.div>
-        )}
 
         {/* TAB 4: SOCIAL & WEB NARRATIVES */}
         {activeTab === 'social' && (
@@ -2272,6 +1892,16 @@ export default function ResearchDashboard(props: Props) {
             {/* If pattern report loaded successfully */}
             {patternReport && (
               <div className="space-y-8 animate-fadeIn">
+                <div className="flex justify-end">
+                  <button 
+                    onClick={handleFetchPatterns}
+                    disabled={loadingPatterns}
+                    className="flex items-center gap-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 px-4 py-2 rounded-lg text-xs font-bold uppercase transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingPatterns ? 'animate-spin' : ''}`} />
+                    Regenerate Creative Patterns
+                  </button>
+                </div>
                 {/* Introduction Summary Card */}
                 <div className="relative bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 md:p-8 rounded-2xl shadow-xl overflow-hidden group">
                   <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-cyan-400 to-blue-500" />
@@ -2595,6 +2225,16 @@ export default function ResearchDashboard(props: Props) {
             {/* If guest intelligence report loaded successfully */}
             {guestReport && (
               <div className="space-y-8 animate-fadeIn">
+                <div className="flex justify-end">
+                  <button 
+                    onClick={handleFetchGuestIntelligence}
+                    disabled={loadingGuest}
+                    className="flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-lg text-xs font-bold uppercase transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingGuest ? 'animate-spin' : ''}`} />
+                    Regenerate Guest Deep-Dive
+                  </button>
+                </div>
                 
                 {/* 1. Hero Biographical dossier Card */}
                 <div className="relative bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 rounded-3xl p-6 md:p-8 shadow-2xl overflow-hidden group">
@@ -2868,8 +2508,13 @@ export default function ResearchDashboard(props: Props) {
                     </div>
 
                     <ul className="space-y-4">
-                      {Array.isArray(guestReport.untapped_angles) && guestReport.untapped_angles.map((item: string, idx: number) => {
+                      {Array.isArray(guestReport.untapped_angles) && guestReport.untapped_angles.map((item: any, idx: number) => {
                         const isCopied = copySuccess === `untapped-${idx}`;
+                        const angleText = typeof item === 'string' ? item : item.angle;
+                        const contextText = typeof item === 'object' && item.context ? item.context : '';
+                        const explanationText = typeof item === 'object' && item.explanation ? item.explanation : '';
+                        const dataSourceText = typeof item === 'object' && item.data_source ? item.data_source : '';
+                        
                         return (
                           <div 
                             key={idx} 
@@ -2884,10 +2529,25 @@ export default function ResearchDashboard(props: Props) {
                                   <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
                                   Untapped Hook Direction
                                 </strong>
-                                <p className="text-xs font-bold text-white leading-relaxed">{item}</p>
-                                <span className="block text-xs text-neutral-400 leading-relaxed bg-emerald-950/15 border border-emerald-950/20 p-2.5 rounded-lg mt-2 font-medium">
-                                  🎯 <strong className="text-emerald-300 font-bold">Interviewer Objective:</strong> Use this angle to pivot the conversation away from high-level summaries and force the guest to reveal concrete trade-offs, operational bottlenecks, or private friction points they've never publicly detailed.
-                                </span>
+                                <p className="text-xs font-bold text-white leading-relaxed">{angleText}</p>
+                                
+                                {contextText ? (
+                                  <div className="mt-3 space-y-2 border-l-2 border-emerald-500/30 pl-3 py-1">
+                                    <p className="text-xs text-neutral-300 leading-relaxed">
+                                      <strong className="text-emerald-400">Context:</strong> {contextText}
+                                    </p>
+                                    <p className="text-xs text-neutral-400 leading-relaxed">
+                                      <strong className="text-emerald-400">Explanation:</strong> {explanationText}
+                                    </p>
+                                    <p className="text-xs text-neutral-500 italic mt-1">
+                                      <strong className="text-neutral-400 not-italic">Data Source:</strong> {dataSourceText}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <span className="block text-xs text-neutral-400 leading-relaxed bg-emerald-950/15 border border-emerald-950/20 p-2.5 rounded-lg mt-2 font-medium">
+                                    🎯 <strong className="text-emerald-300 font-bold">Interviewer Objective:</strong> Use this angle to pivot the conversation away from high-level summaries and force the guest to reveal concrete trade-offs, operational bottlenecks, or private friction points they've never publicly detailed.
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div className="pt-3 border-t border-neutral-900/60 flex justify-end">
@@ -3145,6 +2805,16 @@ export default function ResearchDashboard(props: Props) {
             {/* If loaded successfully */}
             {viralityBrief && (
               <div className="space-y-8 animate-fadeIn">
+                <div className="flex justify-end">
+                  <button 
+                    onClick={handleFetchViralityBrief}
+                    disabled={loadingViralityBrief}
+                    className="flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 px-4 py-2 rounded-lg text-xs font-bold uppercase transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingViralityBrief ? 'animate-spin' : ''}`} />
+                    Regenerate Virality Playbook
+                  </button>
+                </div>
                 
                 {/* Executive Hook Header */}
                 <div className="relative bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 md:p-8 rounded-3xl shadow-xl overflow-hidden">
@@ -3205,10 +2875,22 @@ export default function ResearchDashboard(props: Props) {
                                 </div>
                               </div>
                             </div>
-                            <div className="pt-2 border-t border-neutral-900 flex justify-end">
+                            <div className="pt-2 border-t border-neutral-900 flex justify-end gap-2">
+                              <button
+                                onClick={() => handleRegenerateViralityItem('question', idx, 'optimized_questions')}
+                                disabled={regeneratingItemKey === `question-${idx}`}
+                                className="bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-neutral-400 hover:text-cyan-400 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide uppercase transition active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                {regeneratingItemKey === `question-${idx}` ? (
+                                  <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Regenerating...</>
+                                ) : (
+                                  <><RefreshCw className="w-3 h-3" /> Regenerate</>
+                                )}
+                              </button>
                               <button
                                 onClick={() => handleCopyText(q.primary_question || q.question, `v-q-${idx}`)}
-                                className="bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-orange-405 hover:text-orange-300 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide uppercase transition active:scale-95 flex items-center gap-1.5"
+                                disabled={regeneratingItemKey === `question-${idx}`}
+                                className="bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-orange-405 hover:text-orange-300 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide uppercase transition active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
                               >
                                 {isCopied ? (
                                   <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
@@ -3255,12 +2937,26 @@ export default function ResearchDashboard(props: Props) {
                                   <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500" style={{ width: `${Math.min(100, t.predicted_ctr * 6.5)}%` }} />
                                 </div>
                               </div>
-                              <button
-                                onClick={() => handleCopyText(t.title, `v-t-${idx}`)}
-                                className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-cyan-500/40 text-neutral-400 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0"
-                              >
-                                {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-450" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
+                              <div className="flex flex-col gap-2">
+                                <button
+                                  onClick={() => handleRegenerateViralityItem('title', idx, 'title_variants')}
+                                  disabled={regeneratingItemKey === `title-${idx}`}
+                                  className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-cyan-500/40 text-neutral-400 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0 disabled:opacity-50"
+                                >
+                                  {regeneratingItemKey === `title-${idx}` ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => handleCopyText(t.title, `v-t-${idx}`)}
+                                  disabled={regeneratingItemKey === `title-${idx}`}
+                                  className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-cyan-500/40 text-neutral-400 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0 disabled:opacity-50"
+                                >
+                                  {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-450" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
                             </div>
                           );
                         })
@@ -3300,12 +2996,26 @@ export default function ResearchDashboard(props: Props) {
                                     </span>
                                   </div>
                                 </div>
-                                <button
-                                  onClick={() => handleCopyText(`Concept: ${renderSafeStringText(th.concept_name)}. Overlay: ${renderSafeStringText(th.text_overlay)}. Description: ${renderSafeStringText(th.visual_description)}`, `v-th-${idx}`)}
-                                  className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-purple-500/30 text-neutral-400 hover:text-purple-405 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0"
-                                >
-                                  {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-455" /> : <Copy className="w-3.5 h-3.5" />}
-                                </button>
+                                <div className="flex flex-col gap-2">
+                                  <button
+                                    onClick={() => handleRegenerateViralityItem('thumbnail', idx, 'thumbnail_concepts')}
+                                    disabled={regeneratingItemKey === `thumbnail-${idx}`}
+                                    className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-purple-500/30 text-neutral-400 hover:text-purple-405 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0 disabled:opacity-50"
+                                  >
+                                    {regeneratingItemKey === `thumbnail-${idx}` ? (
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopyText(`Concept: ${renderSafeStringText(th.concept_name)}. Overlay: ${renderSafeStringText(th.text_overlay)}. Description: ${renderSafeStringText(th.visual_description)}`, `v-th-${idx}`)}
+                                    disabled={regeneratingItemKey === `thumbnail-${idx}`}
+                                    className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-purple-500/30 text-neutral-400 hover:text-purple-405 opacity-0 group-hover:opacity-100 transition active:scale-95 flex-shrink-0 disabled:opacity-50"
+                                  >
+                                    {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-455" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           );
@@ -4106,6 +3816,138 @@ export default function ResearchDashboard(props: Props) {
                 <div className="text-center py-12 bg-neutral-900 rounded-xl border border-neutral-900 border-dashed">
                   <AlertTriangle className="w-8 h-8 text-neutral-600 mx-auto mb-3" />
                   <p className="text-sm text-neutral-400">No high-traction X (Twitter) signals discovered for this guest.</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: LINKEDIN INTEL */}
+        {activeTab === 'linkedin' && (
+          <motion.div
+            key="linkedin"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-8"
+          >
+            <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-2xl shadow-xl">
+              <h3 className="text-xl font-black text-white flex items-center gap-2 mb-6">
+                <Users className="text-blue-400 w-5 h-5" />
+                LinkedIn Professional Signals
+                {data.linkedin_intelligence?.linkedin_profile_url && (
+                  <a href={data.linkedin_intelligence.linkedin_profile_url} target="_blank" rel="noopener noreferrer" className="ml-auto bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 px-3 py-1 rounded-full text-xs font-bold font-sans flex items-center gap-1 transition">
+                    View Profile <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </h3>
+              <p className="text-sm text-neutral-400 mb-6">
+                Cross-platform audience engagement metrics collected from LinkedIn to map professional authority and B2B virality beyond podcast environments.
+              </p>
+
+              {/* Premium Simulated intelligence banner */}
+              {data.linkedin_intelligence?.is_simulated && (
+                <div className="relative p-5 rounded-2xl border border-blue-500/20 bg-gradient-to-r from-blue-500/10 via-cyan-500/5 to-transparent mb-6 overflow-hidden animate-fadeIn">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+                  <div className="flex items-start gap-4">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center">
+                      <Sparkles className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white text-xs uppercase tracking-wider">AI Virality Simulation Model</span>
+                        <span className="bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md font-mono">Bypassing API limits</span>
+                      </div>
+                      <p className="text-xs text-neutral-300 leading-relaxed font-sans max-w-3xl">
+                        Real-time platform boundaries active. Using advanced machine learning models to synthesize a high-fidelity professional footprint for <strong>{data.guest_name || "this guest"}</strong> based on search signals and public domain indexes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {data.linkedin_intelligence?.raw_signals && data.linkedin_intelligence.raw_signals.length > 0 ? (
+                <>
+                  {/* AI Insights Card */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div className="bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 rounded-2xl shadow-xl relative overflow-hidden group">
+                      <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-400 to-cyan-500" />
+                      <h4 className="text-sm font-bold text-neutral-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <Flame className="w-4 h-4 text-blue-400" />
+                        Core Viral Themes
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {data.linkedin_intelligence.viral_themes?.map((theme, i) => (
+                          <span key={i} className="bg-blue-500/10 border border-blue-500/20 text-blue-300 px-3 py-1 rounded-full text-xs font-semibold">
+                            #{theme}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-xl">
+                        <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest block mb-2">Professional Sentiment</span>
+                        <p className="text-xs text-neutral-300 leading-relaxed">
+                          {data.linkedin_intelligence.professional_sentiment}
+                        </p>
+                      </div>
+                      <div className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-xl">
+                        <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest block mb-2">Persona Delta</span>
+                        <p className="text-xs text-neutral-300 leading-relaxed">
+                          {data.linkedin_intelligence.persona_delta}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Raw Signals Grid */}
+                  <h4 className="text-sm font-bold text-neutral-300 uppercase tracking-widest mb-4">Raw Signals Feed</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {data.linkedin_intelligence.raw_signals.map((signal, idx) => {
+                      const liUrl = signal.url || `https://linkedin.com/search/results/all/?keywords=${encodeURIComponent(signal.author || data.guest_name || '')}`;
+                      return (
+                        <div key={idx} className="bg-neutral-900/50 border border-neutral-800/60 backdrop-blur-sm hover:border-blue-500/30 rounded-xl p-5 transition-all duration-300">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="text-sm font-bold text-white line-clamp-2">
+                              {signal.author || "LinkedIn Post"}
+                            </span>
+                            <a href={liUrl} target="_blank" rel="noopener noreferrer" className="text-neutral-600 hover:text-blue-400">
+                              <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                            </a>
+                          </div>
+                          <p className="text-xs text-neutral-305 mb-4 leading-relaxed font-sans line-clamp-4">
+                            {signal.post_text}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                            {signal.likes !== undefined && signal.likes > 0 && (
+                              <span className="flex items-center gap-1.5 bg-neutral-900 px-2 py-1 rounded-md">
+                                <ThumbsUp className="w-3.5 h-3.5 text-blue-500" />
+                                {signal.likes >= 1000 ? `${(signal.likes / 1000).toFixed(1)}K` : signal.likes} Likes
+                              </span>
+                            )}
+                            {signal.comments !== undefined && signal.comments > 0 && (
+                              <span className="flex items-center gap-1.5 bg-neutral-900 px-2 py-1 rounded-md">
+                                <MessageCircle className="w-3.5 h-3.5 text-cyan-550" />
+                                {signal.comments >= 1000 ? `${(signal.comments / 1000).toFixed(1)}K` : signal.comments} Comments
+                              </span>
+                            )}
+                            {(signal.is_simulated || data.linkedin_intelligence?.is_simulated) && (
+                              <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md border border-blue-500/20 text-xs font-extrabold font-mono">
+                                Model Feed
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12 bg-neutral-900 rounded-xl border border-neutral-900 border-dashed">
+                  <AlertTriangle className="w-8 h-8 text-neutral-600 mx-auto mb-3" />
+                  <p className="text-sm text-neutral-400">No high-traction LinkedIn signals discovered for this guest.</p>
                 </div>
               )}
             </div>

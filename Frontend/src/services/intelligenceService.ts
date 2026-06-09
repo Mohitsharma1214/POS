@@ -57,6 +57,7 @@ export async function fetchViralityBrief(payload: {
   cached_patterns?: any;
   cached_intelligence?: any;
   cached_comments?: any[];
+  cached_signals?: any;
 }): Promise<any> {
   const res = await fetch(getApiUrl('/research/virality-brief'), {
     method: 'POST',
@@ -64,6 +65,25 @@ export async function fetchViralityBrief(payload: {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error('Failed to fetch virality brief');
+  return res.json();
+}
+
+export async function fetchRegenerateViralityItem(payload: {
+  item_type: string;
+  guest_name: string;
+  guest_niche?: string;
+  cached_patterns?: any;
+  cached_intelligence?: any;
+  cached_comments?: any[];
+  cached_signals?: any;
+  existing_items?: any[];
+}): Promise<any> {
+  const res = await fetch(getApiUrl('/research/virality-brief/regenerate-item'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to regenerate virality item');
   return res.json();
 }
 
@@ -119,7 +139,8 @@ export async function fetchFullPipeline(payload: {
     apify_scrape_episodes: signals.apify_scrape_episodes || [],
     cached_patterns: patterns.pattern_report,
     cached_intelligence: intelligence,
-    cached_comments: signals.comment_intelligence || []
+    cached_comments: signals.comment_intelligence || [],
+    cached_signals: signals
   };
   const briefRes = await fetch(getApiUrl('/research/virality-brief'), {
     method: 'POST',

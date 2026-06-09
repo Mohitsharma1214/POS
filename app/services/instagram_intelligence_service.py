@@ -4,11 +4,12 @@ import re
 from typing import List, Dict, Any
 
 from app.schemas.podcast_intelligence_output import InstagramSignal
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 class InstagramIntelligenceService:
     def __init__(self):
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm = AnthropicService(model=settings.MODEL_SONNET)
 
     async def analyze_signals(self, guest_name: str, raw_signals: List[InstagramSignal]) -> Dict[str, Any]:
         """
@@ -29,15 +30,14 @@ Analyze the following Instagram signals for the guest "{guest_name}".
 Instagram Signals:
 {json.dumps([s.model_dump() for s in raw_signals], indent=2)}
 
-Based on these signals, provide a structured JSON analysis with exactly these three keys:
-1. "viral_themes": A list of strings representing the primary topics, aesthetics, or messages driving the guest's engagement on Instagram. Keep them short (e.g. "Behind-the-scenes family life", "Contrarian business takes").
+Based on these signals, provide a structured JSON analysis with exactly these two keys:
+1. "viral_themes": A list of strings representing the primary topics, aesthetics, or messages driving the guest's engagement on Instagram. Keep them short.
 2. "audience_sentiment": A short paragraph summarizing how the Instagram audience reacts to them. Is it highly supportive? Polarized? Thirsty? Aesthetic-focused?
-3. "persona_delta": A short paragraph explaining how their Instagram persona (the topics they post, how they present themselves) might differ from their serious podcast or professional persona.
 
 Respond ONLY with valid JSON.
 """
         try:
-            parsed = await self.openrouter.complete(prompt, return_json=True)
+            parsed = await self.llm.complete(prompt, return_json=True)
             if not isinstance(parsed, dict):
                 parsed = {}
             return {
@@ -46,7 +46,7 @@ Respond ONLY with valid JSON.
                 "persona_delta": parsed.get("persona_delta", "Analysis could not determine persona delta.")
             }
         except Exception as e:
-            logging.error(f"Failed to analyze Instagram signals for {guest_name} via OpenRouter: {e}. Falling back to high-fidelity local synthesis.")
+            logging.error(f"Failed to analyze Instagram signals for {guest_name} via Anthropic: {e}. Falling back to high-fidelity local synthesis.")
             return self._analyze_signals_locally(guest_name, raw_signals)
 
     def _analyze_signals_locally(self, guest_name: str, raw_signals: List[InstagramSignal]) -> Dict[str, Any]:

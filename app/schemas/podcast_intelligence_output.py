@@ -38,6 +38,7 @@ class NicheTrend(BaseModel):
     niche: Optional[str] = None
     description: Optional[str] = None
     real_questions_asked: List[str] = []
+    most_replayed_question: Optional[str] = None
 
 class Episode(BaseModel):
     title: str
@@ -55,6 +56,7 @@ class Episode(BaseModel):
     channel_name: Optional[str] = None
     description: Optional[str] = None
     real_questions_asked: List[str] = []
+    most_replayed_question: Optional[str] = None
 
 class RedditDiscussion(BaseModel):
     subreddit: Optional[str] = None
@@ -127,6 +129,7 @@ class ApifyScrapeEpisode(BaseModel):
     description: Optional[str] = None
     view_count: Optional[int] = None
     comment_themes: List[str] = []
+    most_replayed_question: Optional[str] = None
 
 class InstagramSignal(BaseModel):
     title: str
@@ -154,6 +157,24 @@ class TwitterIntelligence(BaseModel):
     is_simulated: Optional[bool] = False
     twitter_handle: Optional[str] = ""
 
+class LinkedInSignal(BaseModel):
+    post_text: str
+    author: str
+    published_at: Optional[str] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None
+    reposts: Optional[int] = None
+    url: Optional[str] = None
+    is_simulated: Optional[bool] = False
+
+class LinkedInIntelligence(BaseModel):
+    raw_signals: List[LinkedInSignal] = Field(default_factory=list)
+    viral_themes: List[str] = Field(default_factory=list)
+    professional_sentiment: str = ""
+    persona_delta: str = ""
+    is_simulated: Optional[bool] = False
+    linkedin_profile_url: Optional[str] = ""
+
 class PodcastIntelligenceOutput(BaseModel):
     guest_name: Optional[str] = None
     inferred_niche: Optional[str] = None
@@ -166,6 +187,7 @@ class PodcastIntelligenceOutput(BaseModel):
     reddit_discussions: List[RedditDiscussion] = Field(default_factory=list, description="Trending and controversial Reddit threads")
     instagram_intelligence: InstagramIntelligence = Field(default_factory=InstagramIntelligence, description="AI-analyzed Instagram signals")
     twitter_intelligence: TwitterIntelligence = Field(default_factory=TwitterIntelligence, description="AI-analyzed Twitter/X signals")
+    linkedin_intelligence: LinkedInIntelligence = Field(default_factory=LinkedInIntelligence, description="AI-analyzed LinkedIn signals")
     
     similar_guests: List[SimilarGuest] = Field(default_factory=list, description="Guests with similar audience overlap")
     viral_topics: List[ViralTopic] = Field(default_factory=list, description="Topics currently gaining traction for this guest")

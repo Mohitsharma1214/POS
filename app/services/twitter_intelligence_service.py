@@ -4,11 +4,12 @@ import re
 from typing import List, Dict, Any
 
 from app.schemas.podcast_intelligence_output import TwitterSignal
-from app.services.openrouter_service import OpenRouterService
+from app.services.anthropic_service import AnthropicService
 
 class TwitterIntelligenceService:
     def __init__(self):
-        self.openrouter = OpenRouterService()
+        from app.core.config import settings
+        self.llm = AnthropicService(model=settings.MODEL_SONNET)
 
     async def analyze_signals(self, guest_name: str, raw_signals: List[TwitterSignal]) -> Dict[str, Any]:
         """
@@ -29,15 +30,14 @@ Analyze the following Twitter/X posts for the guest "{guest_name}".
 Twitter Signals:
 {json.dumps([s.model_dump() for s in raw_signals], indent=2)}
 
-Based on these signals, provide a structured JSON analysis with exactly these three keys:
-1. "viral_themes": A list of strings representing the primary topics, aesthetics, or messages driving the guest's engagement on Twitter/X. Keep them short (e.g. "Contrarian business takes", "Direct developer engagement").
+Based on these signals, provide a structured JSON analysis with exactly these two keys:
+1. "viral_themes": A list of strings representing the primary topics, aesthetics, or messages driving the guest's engagement on Twitter/X. Keep them short.
 2. "audience_sentiment": A short paragraph summarizing how the Twitter/X audience reacts to them. Is it highly supportive? Polarized? Critical? Tech-focused?
-3. "persona_delta": A short paragraph explaining how their Twitter/X persona (the topics they post, how they present themselves, e.g. meme-heavy, aggressive, visionary) might differ from their serious podcast or professional persona.
 
 Respond ONLY with valid JSON.
 """
         try:
-            parsed = await self.openrouter.complete(prompt, return_json=True)
+            parsed = await self.llm.complete(prompt, return_json=True)
             if not isinstance(parsed, dict):
                 parsed = {}
             return {

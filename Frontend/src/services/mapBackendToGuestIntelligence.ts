@@ -25,6 +25,12 @@ export function mapBackendToGuestIntelligence(raw: any): PodcastIntelligenceOutp
       audience_sentiment: "",
       persona_delta: ""
     },
+    linkedin_intelligence: d.linkedin_intelligence || {
+      raw_signals: [],
+      viral_themes: [],
+      professional_sentiment: "",
+      persona_delta: ""
+    },
     viral_topics: d.viral_topics || [],
     cross_platform_narratives: d.cross_platform_narratives || [],
     weighted_scores: d.weighted_scores || [],
